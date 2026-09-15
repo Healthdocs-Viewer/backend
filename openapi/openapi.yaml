@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Healthdocs Viewer API
-  version: 0.2.0
+  version: 0.2.1
   description: |
     Contrato inicial del MVP. Es la fuente única de verdad entre frontend y backend.
     Los archivos se transfieren directamente con URLs prefirmadas; la API no recibe el contenido binario.
@@ -59,7 +59,7 @@ paths:
     get:
       summary: Obtiene el perfil autenticado
       operationId: getCurrentUser
-      description: Paciente, estudiante o profesor; devuelve solo el perfil autenticado.
+      description: Paciente, estudiante o profesor; devuelve la identidad, el rol y el estado de habilitación de la cuenta autenticada.
       responses:
         '200':
           description: Perfil actual
@@ -379,7 +379,7 @@ components:
       enum: [CREATED, FILES_RECEIVED, ENABLED_FOR_PROCESSING, RESULT_UPLOADED, RESULT_AVAILABLE]
     UserProfile:
       type: object
-      required: [id, email, role]
+      required: [id, email, role, enabled]
       properties:
         id:
           type: string
@@ -389,6 +389,9 @@ components:
           format: email
         role:
           $ref: '#/components/schemas/UserRole'
+        enabled:
+          type: boolean
+          description: Indica si la cuenta está habilitada para operar.
     CaseSummary:
       type: object
       required: [id, status, createdAt]
