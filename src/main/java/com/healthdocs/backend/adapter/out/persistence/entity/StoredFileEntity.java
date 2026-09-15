@@ -15,6 +15,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 @Entity
 @Table(name = "stored_file")
@@ -48,16 +49,22 @@ public class StoredFileEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @UpdateTimestamp
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
     protected StoredFileEntity() {
     }
 
     public StoredFileEntity(
+            UUID id,
             MedicalCaseEntity medicalCase,
             String objectKey,
             FileKind fileKind,
             String originalFilename,
             String contentType,
             Long sizeBytes) {
+        this.id = id;
         this.medicalCase = medicalCase;
         this.objectKey = objectKey;
         this.fileKind = fileKind;
@@ -96,5 +103,13 @@ public class StoredFileEntity {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(Instant updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }

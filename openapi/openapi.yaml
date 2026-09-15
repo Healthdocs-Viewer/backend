@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Healthdocs Viewer API
-  version: 0.2.1
+  version: 0.3.0
   description: |
     Contrato inicial del MVP. Es la fuente única de verdad entre frontend y backend.
     Los archivos se transfieren directamente con URLs prefirmadas; la API no recibe el contenido binario.
@@ -104,6 +104,45 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /cases/{caseId}/consent:
+    post:
+      summary: Registra la aceptación del consentimiento informado
+      operationId: acceptConsent
+      description: |
+        Solo paciente propietario de caseId. Persiste el consentimiento con un
+        timestamp de aceptación y la versión de los términos aceptados.
+        Si el paciente ya aceptó esta versión de los términos para este caso,
+        devuelve 409. El caso debe existir y pertenecer al paciente autenticado.
+        Este paso es obligatorio antes de solicitar la URL de carga de archivos.
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptConsentRequest'
+      responses:
+        '201':
+          description: Consentimiento registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentRecord'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El consentimiento para esta versión de términos ya fue registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /cases/{caseId}/uploads:
     post:
       summary: Crea una intención de carga de archivo de entrada
@@ -492,3 +531,38 @@ components:
           type: string
         traceId:
           type: string
+    AcceptConsentRequest:
+      type: object
+      additionalProperties: false
+      required: [termsVersion]
+      properties:
+        termsVersion:
+          type: string
+          minLength: 1
+          description: >
+            Versión de los términos y condiciones que el paciente acepta,
+            por ejemplo "1.0". El servidor rechaza versiones desconocidas con 400.
+        acceptedAt:
+          type: string
+          format: date-time
+          description: >
+            Timestamp ISO-8601 en el que el paciente confirma la aceptación
+            desde el cliente. Si se omite, el servidor usa su propio timestamp.
+    ConsentRecord:
+      type: object
+      required: [id, caseId, termsVersion, acceptedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único del registro de consentimiento.
+        caseId:
+          type: string
+          format: uuid
+        termsVersion:
+          type: string
+          description: Versión de los términos aceptados.
+        acceptedAt:
+          type: string
+          format: date-time
+          description: Timestamp registrado en el servidor al momento de la aceptación.

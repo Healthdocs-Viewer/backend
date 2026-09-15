@@ -33,6 +33,12 @@ public class MedicalCaseEntity {
     @Column(nullable = false, length = 50)
     private CaseStatus status;
 
+    @Column(name = "reference_code", nullable = false, unique = true, length = 32)
+    private String referenceCode;
+
+    @Column(name = "study_type", nullable = false, length = 100)
+    private String studyType;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -44,9 +50,12 @@ public class MedicalCaseEntity {
     protected MedicalCaseEntity() {
     }
 
-    public MedicalCaseEntity(AppUserEntity patient, CaseStatus status) {
+    public MedicalCaseEntity(UUID id, AppUserEntity patient, CaseStatus status, String referenceCode, String studyType) {
+        this.id = id;
         this.patient = patient;
         this.status = status;
+        this.referenceCode = referenceCode;
+        this.studyType = studyType;
     }
 
     public UUID getId() {
@@ -61,11 +70,27 @@ public class MedicalCaseEntity {
         return status;
     }
 
+    public void setStatus(CaseStatus status) {
+        this.status = status;
+    }
+
+    public String getReferenceCode() {
+        return referenceCode;
+    }
+
+    public String getStudyType() {
+        return studyType;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public void setUpdatedAt(Instant updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }
