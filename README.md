@@ -29,6 +29,10 @@ src/main/java/com/healthdocs/backend/
 
 La estructura se completará con los primeros casos de uso. La migración `V1__initial_schema.sql` crea únicamente las tablas mínimas para usuario, caso, archivo y resultado.
 
+## Contrato API
+
+El contrato canónico vive en [`openapi/openapi.yaml`](openapi/openapi.yaml). Antes de implementar o consumir un endpoint, revisar la [guía de trabajo paralelo](docs/api-contract-workflow.md).
+
 ## Seguridad
 
 - No subir `.env`, secretos ni credenciales AWS al repositorio.
