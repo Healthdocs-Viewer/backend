@@ -1,20 +1,65 @@
 openapi: 3.1.0
 info:
   title: Healthdocs Viewer API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Contrato inicial del MVP. Es la fuente única de verdad entre frontend y backend.
     Los archivos se transfieren directamente con URLs prefirmadas; la API no recibe el contenido binario.
+
+    Autenticación local de desarrollo con cuentas de prueba mediante POST /auth/login.
+    No define la autenticación de producción. Las demás rutas requieren Authorization:
+    Bearer <token>. El JWT firmado contiene sub (UserProfile.id), role (UserRole) y
+    exp (expiración en segundos Unix). La identidad y el rol proceden del token validado.
+    Los roles iniciales paciente, estudiante y profesor sustituyen en 0.2.0 los valores
+    PATIENT, STUDENT, PROFESSOR y ADMIN; no existe un administrador inicial.
+
+    Un paciente solo accede a sus casos. Estudiantes y profesores solo acceden a casos
+    habilitados explícitamente para su usuario; el rol no concede acceso global.
+    Las listas aplican los mismos filtros. Se verifica también que cada archivo o
+    resultado pertenezca al caso autorizado antes de modificarlo o emitir URLs.
+    401 indica credenciales incorrectas o token ausente, inválido o expirado.
+    403 indica identidad autenticada sin rol, propiedad o habilitación requerida.
+    Los errores no revelan propietarios, asignaciones ni datos de otros usuarios.
 servers:
   - url: http://localhost:8080/api/v1
     description: Desarrollo local
 security:
   - bearerAuth: []
 paths:
+  /auth/login:
+    post:
+      summary: Inicia una sesión local de desarrollo
+      description: |
+        Solo desarrollo local con cuentas de prueba. No requiere un JWT previo.
+        El servidor determina usuario y rol a partir de las credenciales; el cliente
+        no puede seleccionar su rol. Devuelve 401 por credenciales incorrectas y
+        403 si la cuenta autenticada no está habilitada o no tiene un rol inicial.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Sesión iniciada; usar el token como credencial Bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /me:
     get:
       summary: Obtiene el perfil autenticado
       operationId: getCurrentUser
+      description: Paciente, estudiante o profesor; devuelve solo el perfil autenticado.
       responses:
         '200':
           description: Perfil actual
@@ -24,10 +69,13 @@ paths:
                 $ref: '#/components/schemas/UserProfile'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /cases:
     post:
       summary: Crea un caso para el paciente autenticado
       operationId: createCase
+      description: Solo paciente. El servidor establece al usuario autenticado como propietario.
       responses:
         '201':
           description: Caso creado
@@ -42,6 +90,7 @@ paths:
     get:
       summary: Lista los casos del paciente autenticado
       operationId: listMyCases
+      description: Solo paciente; devuelve únicamente casos propiedad del usuario autenticado.
       responses:
         '200':
           description: Casos del paciente
@@ -53,10 +102,13 @@ paths:
                   $ref: '#/components/schemas/CaseSummary'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /cases/{caseId}/uploads:
     post:
       summary: Crea una intención de carga de archivo de entrada
       operationId: createInputUpload
+      description: Solo paciente propietario de caseId.
       parameters:
         - $ref: '#/components/parameters/CaseId'
       requestBody:
@@ -82,6 +134,10 @@ paths:
     post:
       summary: Confirma que el navegador terminó una carga directa
       operationId: completeUpload
+      description: |
+        Para INPUT, requiere paciente propietario del caso. Para RESULT, requiere
+        estudiante o profesor habilitado para el caso. El servidor obtiene el caso
+        y tipo desde fileId y verifica que el usuario haya iniciado la intención de carga.
       parameters:
         - $ref: '#/components/parameters/FileId'
       responses:
@@ -101,6 +157,7 @@ paths:
     get:
       summary: Lista los casos habilitados para el usuario interno autenticado
       operationId: listAssignedCases
+      description: Solo estudiante o profesor; lista únicamente casos habilitados para su usuario.
       responses:
         '200':
           description: Casos habilitados
@@ -118,6 +175,7 @@ paths:
     post:
       summary: Crea una intención de descarga para un archivo habilitado
       operationId: createInputDownload
+      description: Solo estudiante o profesor habilitado para caseId; fileId debe ser INPUT y pertenecer a ese caso.
       parameters:
         - $ref: '#/components/parameters/CaseId'
         - $ref: '#/components/parameters/FileId'
@@ -138,6 +196,7 @@ paths:
     post:
       summary: Crea una intención de carga de resultado externo
       operationId: createResultUpload
+      description: Solo estudiante o profesor habilitado para caseId.
       parameters:
         - $ref: '#/components/parameters/CaseId'
       requestBody:
@@ -160,7 +219,11 @@ paths:
   /operations/cases/{caseId}/assignments:
     post:
       summary: Habilita temporalmente un caso para un usuario interno
-      description: Operación provisional para la primera demostración; el rol responsable definitivo sigue pendiente.
+      description: |
+        Regla provisional de desarrollo local: solo profesor ya habilitado para caseId
+        puede habilitar a otro estudiante o profesor. La habilitación inicial del profesor
+        se prepara en los datos de prueba locales; el rol no permite acceder a casos ajenos.
+        El rol responsable definitivo sigue pendiente de validación.
       operationId: assignCase
       parameters:
         - $ref: '#/components/parameters/CaseId'
@@ -185,7 +248,10 @@ paths:
   /operations/results/{resultId}/availability:
     post:
       summary: Marca un resultado como disponible
-      description: Operación provisional para la primera demostración; la regla y responsable definitivos siguen pendientes.
+      description: |
+        Regla provisional de desarrollo local: solo profesor habilitado para el caso
+        al que pertenece resultId. El servidor resuelve y verifica esa relación.
+        La regla y el responsable definitivos siguen pendientes de validación.
       operationId: makeResultAvailable
       parameters:
         - $ref: '#/components/parameters/ResultId'
@@ -202,6 +268,7 @@ paths:
     get:
       summary: Obtiene una intención de descarga del resultado disponible del paciente
       operationId: getPatientResult
+      description: Solo paciente propietario de caseId; el resultado debe pertenecer a ese caso y estar disponible.
       parameters:
         - $ref: '#/components/parameters/CaseId'
       responses:
@@ -223,6 +290,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: JWT de POST /auth/login; enviar en Authorization como Bearer <token>.
   parameters:
     CaseId:
       name: caseId
@@ -247,13 +315,19 @@ components:
         format: uuid
   responses:
     Unauthorized:
-      description: Sesión ausente o inválida
+      description: Credenciales incorrectas o token ausente, inválido o expirado; mensaje genérico sin revelar si la cuenta existe.
+      headers:
+        WWW-Authenticate:
+          description: Desafío Bearer para recursos protegidos; no se requiere en el login.
+          schema:
+            type: string
+            example: Bearer
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     Forbidden:
-      description: El perfil no tiene permiso para la operación solicitada
+      description: Identidad autenticada sin acceso habilitado, rol permitido, propiedad o habilitación del caso requerida; mensaje genérico sin datos de otros usuarios.
       content:
         application/json:
           schema:
@@ -271,9 +345,35 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          description: Correo de una cuenta de prueba local.
+        password:
+          type: string
+          format: password
+          minLength: 1
+          writeOnly: true
+    LoginResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          description: JWT firmado con sub igual a user.id, role igual a user.role y exp como expiración en segundos Unix.
+        user:
+          description: Usuario autenticado y su rol; comparte la estructura de GET /me.
+          $ref: '#/components/schemas/UserProfile'
     UserRole:
       type: string
-      enum: [PATIENT, STUDENT, PROFESSOR, ADMIN]
+      description: Roles iniciales de desarrollo; valores transmitidos en minúsculas.
+      enum: [paciente, estudiante, profesor]
     CaseStatus:
       type: string
       enum: [CREATED, FILES_RECEIVED, ENABLED_FOR_PROCESSING, RESULT_UPLOADED, RESULT_AVAILABLE]
