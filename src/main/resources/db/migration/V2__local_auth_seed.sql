@@ -1,5 +1,7 @@
 ALTER TABLE app_user
-    ADD COLUMN password_hash VARCHAR(255),
+    ADD COLUMN password_hash VARCHAR(255);
+
+ALTER TABLE app_user
     ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT TRUE;
 
 CREATE TABLE case_assignment (
