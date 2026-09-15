@@ -4,16 +4,26 @@ spring:
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:healthdocs}
     username: ${DB_USER:healthdocs}
-    password: ${DB_PASSWORD:healthdocs_dev_password}
+    password: ${DB_PASSWORD:change_me_for_local_development}
   jpa:
     hibernate:
       ddl-auto: validate
     open-in-view: false
   flyway:
     enabled: true
+    locations: classpath:db/migration,classpath:db/migration-${AUTH_PROVIDER:disabled}
+    fail-on-missing-locations: false
+    validate-on-migrate: true
+    clean-disabled: true
 
 server:
   port: ${SERVER_PORT:8080}
+
+app:
+  auth-provider: ${AUTH_PROVIDER:disabled}
+  jwt:
+    secret: ${JWT_SECRET:change_this_local_secret_to_at_least_32_bytes}
+    expiration: ${JWT_EXPIRATION:3600}
 
 management:
   endpoints:

@@ -11,9 +11,11 @@ API Spring Boot del MVP de Healthdocs Viewer. El backend maneja autorización, c
 ## Arranque local
 
 1. Copia `.env.example` como `.env` y ajusta los valores locales si es necesario.
-2. Ejecuta `docker compose up -d postgres`.
-3. Ejecuta `mvn spring-boot:run`.
-4. Comprueba `http://localhost:8080/actuator/health` y `http://localhost:8080/api/v1/ping`.
+2. Ejecuta `docker compose --env-file .env up -d postgres`.
+3. Si modificaste las variables `DB_*`, expórtalas en la terminal antes de iniciar Spring Boot. Con los valores por defecto no es necesario hacerlo:
+   - PowerShell: `$env:DB_HOST="localhost"; $env:DB_PORT="5432"; $env:DB_NAME="healthdocs"; $env:DB_USER="healthdocs"; $env:DB_PASSWORD="change_me_for_local_development"`
+4. Ejecuta `mvn spring-boot:run`.
+5. Comprueba `http://localhost:8080/actuator/health` y `http://localhost:8080/api/v1/ping`.
 
 Para detener la base de datos, ejecuta `docker compose down`. Para eliminar también los datos locales, ejecuta `docker compose down -v`.
 
@@ -21,13 +23,33 @@ Para detener la base de datos, ejecuta `docker compose down`. Para eliminar tamb
 
 ```text
 src/main/java/com/healthdocs/backend/
-├── adapter/in/web/      # Adaptadores HTTP
-├── application/         # Casos de uso
-├── domain/              # Modelo y reglas de negocio
-└── infrastructure/      # Persistencia e integraciones
+├── adapter/
+│   ├── in/web/          # Adaptadores de entrada HTTP
+│   └── out/persistence/ # Adaptadores de salida y entidades JPA
+├── application/
+│   ├── port/in/         # Casos de uso expuestos por la aplicación
+│   └── service/         # Implementación de casos de uso
+├── domain/model/        # Modelo y reglas de negocio
+└── infrastructure/      # Configuración técnica del framework
 ```
 
-La estructura se completará con los primeros casos de uso. La migración `V1__initial_schema.sql` crea únicamente las tablas mínimas para usuario, caso, archivo y resultado.
+El backend sigue arquitectura hexagonal: los adaptadores HTTP dependen de puertos de entrada de `application`, y la persistencia queda aislada en adaptadores de salida. Las entidades JPA viven en `adapter/out/persistence/entity` y usan los enums del dominio para roles, estados de caso, estados de resultado y tipos de archivo. Los casos de uso no deben depender de Spring MVC, JPA ni PostgreSQL. La migración `V1__initial_schema.sql` crea únicamente las tablas mínimas para usuario, caso, archivo y resultado. Hibernate no crea ni modifica tablas (`ddl-auto=validate`); todos los cambios de esquema deben añadirse como nuevas migraciones Flyway en `src/main/resources/db/migration`.
+
+## Autenticación local de desarrollo
+
+El proveedor se selecciona con `AUTH_PROVIDER`. El valor por defecto seguro es `disabled`; `AUTH_PROVIDER=local` habilita el proveedor local y sus tres cuentas mediante Flyway:
+
+| Rol | Correo | Contraseña |
+|---|---|---|
+| paciente | `paciente@healthdocs.local` | `paciente123` |
+| estudiante | `estudiante@healthdocs.local` | `estudiante123` |
+| profesor | `profesor@healthdocs.local` | `profesor123` |
+
+`POST /api/v1/auth/login` devuelve el JWT local y `GET /api/v1/me` devuelve la identidad, rol y `enabled` de la cuenta autenticada. El secreto debe reemplazarse mediante `JWT_SECRET` fuera del entorno local. En producción se debe usar `AUTH_PROVIDER=disabled` hasta configurar el proveedor real; `AUTH_PROVIDER=local` solo habilita el seed de cuentas de prueba. La interfaz `AuthProvider` y el punto `CognitoAuthProvider` permiten incorporar Cognito sin cambiar controladores ni servicios de aplicación.
+
+**Discrepancia reportada:** la versión actual del contrato OpenAPI (`0.2.0`) no declara `enabled` en `UserProfile`; el backend lo expone de forma aditiva para cerrar el requisito de estado de cuenta. El contrato debe incorporar ese campo en la siguiente actualización coordinada.
+
+Las reglas HTTP base son: `paciente` para `/cases`, `estudiante` o `profesor` para `/internal`, y únicamente `profesor` para `/operations`. Los casos de uso que implementen esas rutas deben validar además propiedad del paciente o asignación explícita del usuario interno antes de consultar archivos, resultados o emitir URLs.
 
 ## Contrato API
 
