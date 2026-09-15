@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:healthdocs;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+  flyway:
+    enabled: true
+
+# El perfil test nunca habilita el proveedor local ni ejecuta seeders locales.
+app:
+  auth-provider: ${AUTH_PROVIDER:cognito}
+
+auth:
+  provider: ${AUTH_PROVIDER:cognito}
+  cognito:
+    region: ${COGNITO_REGION:test-region-1}
+    user-pool-id: ${COGNITO_USER_POOL_ID:test-pool}
+    client-id: ${COGNITO_CLIENT_ID:test-client}

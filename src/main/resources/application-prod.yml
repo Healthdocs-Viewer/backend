@@ -1,0 +1,6 @@
+# Producción exige seleccionar Cognito o proporcionar explícitamente otro proveedor admitido.
+app:
+  auth-provider: ${AUTH_PROVIDER:cognito}
+
+auth:
+  provider: ${AUTH_PROVIDER:cognito}

@@ -25,6 +25,17 @@ app:
     secret: ${JWT_SECRET:change_this_local_secret_to_at_least_32_bytes}
     expiration: ${JWT_EXPIRATION:3600}
 
+auth:
+  provider: ${AUTH_PROVIDER:${app.auth-provider:disabled}}
+  jwt:
+    secret: ${JWT_SECRET:${app.jwt.secret:change_this_local_secret_to_at_least_32_bytes}}
+    issuer: ${JWT_ISSUER:healthdocs-default}
+    expiration: PT1H
+  cognito:
+    region: ${COGNITO_REGION:us-east-1}
+    user-pool-id: ${COGNITO_USER_POOL_ID:pool-id}
+    client-id: ${COGNITO_CLIENT_ID:client-id}
+
 management:
   endpoints:
     web:
