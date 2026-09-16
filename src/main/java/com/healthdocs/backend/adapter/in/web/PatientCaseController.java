@@ -5,6 +5,7 @@ import com.healthdocs.backend.application.service.AcceptTermsUseCase;
 import com.healthdocs.backend.application.service.ConfirmFileUploadUseCase;
 import com.healthdocs.backend.application.service.CreateCaseUseCase;
 import com.healthdocs.backend.application.service.GenerateUploadUrlUseCase;
+import com.healthdocs.backend.application.service.InternalFlowService;
 import com.healthdocs.backend.domain.model.CaseConsent;
 import com.healthdocs.backend.domain.model.CaseStatus;
 import com.healthdocs.backend.domain.model.FileKind;
@@ -33,16 +34,19 @@ public class PatientCaseController {
     private final AcceptTermsUseCase acceptTerms;
     private final GenerateUploadUrlUseCase generateUploadUrl;
     private final ConfirmFileUploadUseCase confirmFileUpload;
+    private final InternalFlowService internalFlow;
 
     public PatientCaseController(
             CreateCaseUseCase createCase,
             AcceptTermsUseCase acceptTerms,
             GenerateUploadUrlUseCase generateUploadUrl,
-            ConfirmFileUploadUseCase confirmFileUpload) {
+            ConfirmFileUploadUseCase confirmFileUpload,
+            InternalFlowService internalFlow) {
         this.createCase = createCase;
         this.acceptTerms = acceptTerms;
         this.generateUploadUrl = generateUploadUrl;
         this.confirmFileUpload = confirmFileUpload;
+        this.internalFlow = internalFlow;
     }
 
     @PostMapping("/cases")
@@ -84,10 +88,12 @@ public class PatientCaseController {
     }
 
     @PostMapping("/files/{fileId}/complete")
-    @PreAuthorize("hasRole('PACIENTE')")
-    public ResponseEntity<FileResponse> completeUpload(
+    public ResponseEntity<?> completeUpload(
             @AuthenticationPrincipal AuthenticatedUser user,
             @PathVariable UUID fileId) {
+        if (user.role() != com.healthdocs.backend.domain.model.Role.PACIENTE) {
+            return ResponseEntity.ok(internalFlow.confirm(user, fileId));
+        }
         StoredFile file = confirmFileUpload.execute(new ConfirmFileUploadUseCase.Command(
                 user.id(), user.role(), user.enabled(), fileId));
         return ResponseEntity.ok(FileResponse.from(file));

@@ -48,6 +48,11 @@ public class CaseResultEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "uploaded_by")
+    private UUID uploadedBy;
+    @Column(name = "uploaded_at")
+    private Instant uploadedAt;
+
     protected CaseResultEntity() {
     }
 
@@ -87,4 +92,8 @@ public class CaseResultEntity {
     public Instant getUpdatedAt() {
         return updatedAt;
     }
+
+    public void recordUpload(UUID userId, Instant at) { this.uploadedBy = userId; this.uploadedAt = at; }
+    public UUID getUploadedBy() { return uploadedBy; }
+    public Instant getUploadedAt() { return uploadedAt; }
 }

@@ -2,6 +2,8 @@ package com.healthdocs.backend.adapter.in.web;
 
 import com.healthdocs.backend.adapter.out.auth.LocalAuthProvider.DisabledAccountException;
 import com.healthdocs.backend.application.service.BusinessRuleViolationException;
+import com.healthdocs.backend.application.service.PayloadTooLargeException;
+import com.healthdocs.backend.application.service.UnsupportedMediaTypeException;
 import com.healthdocs.backend.application.service.ForbiddenOperationException;
 import com.healthdocs.backend.application.service.ResourceNotFoundException;
 import jakarta.validation.ConstraintViolationException;
@@ -55,6 +57,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorResponse("CONFLICT", exception.getMessage(), UUID.randomUUID().toString()));
     }
+
+    @ExceptionHandler(PayloadTooLargeException.class)
+    public ResponseEntity<ErrorResponse> handleTooLarge(PayloadTooLargeException exception) { return ResponseEntity.status(413).body(new ErrorResponse("PAYLOAD_TOO_LARGE", exception.getMessage(), UUID.randomUUID().toString())); }
+
+    @ExceptionHandler(UnsupportedMediaTypeException.class)
+    public ResponseEntity<ErrorResponse> handleMedia(UnsupportedMediaTypeException exception) { return ResponseEntity.status(415).body(new ErrorResponse("UNSUPPORTED_MEDIA_TYPE", exception.getMessage(), UUID.randomUUID().toString())); }
 
     public record ErrorResponse(String code, String message, String traceId) {
     }

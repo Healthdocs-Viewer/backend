@@ -19,6 +19,15 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+healthdocs:
+  internal:
+    local-storage-path: ${HEALTHDOCS_LOCAL_STORAGE_PATH:${java.io.tmpdir}/healthdocs-storage}
+    result-max-size-bytes: ${HEALTHDOCS_RESULT_MAX_SIZE_BYTES:104857600}
+    result-allowed-mime-types: ${HEALTHDOCS_RESULT_ALLOWED_MIME_TYPES:application/pdf,video/mp4,application/dicom,application/zip}
+    upload-ttl-minutes: ${HEALTHDOCS_STORAGE_UPLOAD_TTL_MINUTES:15}
+    download-ttl-minutes: ${HEALTHDOCS_STORAGE_DOWNLOAD_TTL_MINUTES:10}
+    base-url: ${HEALTHDOCS_STORAGE_BASE_URL:http://localhost:8080}
+
 app:
   auth-provider: ${AUTH_PROVIDER:disabled}
   jwt:

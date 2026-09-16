@@ -10,4 +10,6 @@ public interface StoredFileRepository extends JpaRepository<StoredFileEntity, UU
     boolean existsByIdAndMedicalCaseId(UUID fileId, UUID caseId);
 
     long countByMedicalCaseIdAndFileKind(UUID caseId, FileKind fileKind);
+
+    java.util.List<StoredFileEntity> findByMedicalCaseId(UUID caseId);
 }

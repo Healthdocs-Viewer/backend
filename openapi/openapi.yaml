@@ -177,6 +177,8 @@ paths:
         Para INPUT, requiere paciente propietario del caso. Para RESULT, requiere
         estudiante o profesor habilitado para el caso. El servidor obtiene el caso
         y tipo desde fileId y verifica que el usuario haya iniciado la intención de carga.
+        Para RESULT, la confirmación crea la asociación case_result, registra actor
+        y timestamp, y transiciona el caso a RESULT_UPLOADED de forma transaccional.
       parameters:
         - $ref: '#/components/parameters/FileId'
       responses:
@@ -185,7 +187,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FileSummary'
+                $ref: '#/components/schemas/CompleteUploadResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -196,7 +198,10 @@ paths:
     get:
       summary: Lista los casos habilitados para el usuario interno autenticado
       operationId: listAssignedCases
-      description: Solo estudiante o profesor; lista únicamente casos habilitados para su usuario.
+      description: |
+        Solo estudiante o profesor. Lista únicamente casos asignados explícitamente
+        al usuario autenticado, en estado ENABLED_FOR_PROCESSING, con al menos un
+        archivo INPUT y sin resultado ya asociado.
       responses:
         '200':
           description: Casos habilitados
@@ -251,10 +256,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UploadIntent'
+        '400':
+          $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: El caso no está habilitado para procesamiento o ya tiene resultado asociado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: El archivo supera el tamaño máximo configurado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '415':
+          description: Tipo MIME no permitido para resultados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /operations/cases/{caseId}/assignments:
     post:
       summary: Habilita temporalmente un caso para un usuario interno
@@ -433,11 +458,15 @@ components:
           description: Indica si la cuenta está habilitada para operar.
     CaseSummary:
       type: object
-      required: [id, status, createdAt]
+      required: [id, referenceCode, status, studyType, createdAt]
       properties:
         id:
           type: string
           format: uuid
+        referenceCode:
+          type: string
+        studyType:
+          type: string
         status:
           $ref: '#/components/schemas/CaseStatus'
         createdAt:
@@ -470,9 +499,40 @@ components:
         fileKind:
           type: string
           enum: [INPUT, RESULT]
+    CompleteUploadResponse:
+      type: object
+      required: [file]
+      properties:
+        file:
+          $ref: '#/components/schemas/FileSummary'
+        result:
+          description: Presente cuando el archivo confirmado es RESULT.
+          $ref: '#/components/schemas/UploadedResult'
+        caseStatus:
+          description: Estado del caso después de confirmar la carga.
+          $ref: '#/components/schemas/CaseStatus'
+    UploadedResult:
+      type: object
+      required: [id, caseId, status, uploadedBy, uploadedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        caseId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [UPLOADED, AVAILABLE]
+        uploadedBy:
+          type: string
+          format: uuid
+        uploadedAt:
+          type: string
+          format: date-time
     CreateUploadIntentRequest:
       type: object
-      required: [originalFilename, contentType]
+      required: [originalFilename, contentType, sizeBytes]
       properties:
         originalFilename:
           type: string

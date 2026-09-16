@@ -17,5 +17,34 @@ services:
       timeout: 3s
       retries: 10
 
+  backend:
+    build: .
+    container_name: healthdocs-backend
+    restart: unless-stopped
+    profiles: [app]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-healthdocs}
+      DB_USER: ${POSTGRES_USER:-healthdocs}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-change_me_for_local_development}
+      JWT_SECRET: ${JWT_SECRET:-change_this_local_secret_to_at_least_32_bytes}
+      HEALTHDOCS_LOCAL_STORAGE_PATH: /data/healthdocs-storage
+      HEALTHDOCS_RESULT_MAX_SIZE_BYTES: ${HEALTHDOCS_RESULT_MAX_SIZE_BYTES:-104857600}
+      HEALTHDOCS_RESULT_ALLOWED_MIME_TYPES: ${HEALTHDOCS_RESULT_ALLOWED_MIME_TYPES:-application/pdf,video/mp4,application/dicom,application/zip}
+      HEALTHDOCS_STORAGE_UPLOAD_TTL_MINUTES: ${HEALTHDOCS_STORAGE_UPLOAD_TTL_MINUTES:-15}
+      HEALTHDOCS_STORAGE_DOWNLOAD_TTL_MINUTES: ${HEALTHDOCS_STORAGE_DOWNLOAD_TTL_MINUTES:-10}
+      HEALTHDOCS_STORAGE_BASE_URL: ${HEALTHDOCS_STORAGE_BASE_URL:-http://localhost:8080}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - backend-storage:/data/healthdocs-storage
+
 volumes:
   postgres-data:
+  backend-storage:

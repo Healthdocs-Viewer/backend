@@ -17,6 +17,9 @@ API Spring Boot del MVP de Healthdocs Viewer. El backend maneja autorización, c
 4. Ejecuta `mvn spring-boot:run`.
 5. Comprueba `http://localhost:8080/actuator/health` y `http://localhost:8080/api/v1/ping`.
 
+Para ejecutar también el backend dentro de Compose: `docker compose --env-file .env --profile app up -d --build`.
+El storage local queda en el volumen `backend-storage` y no se publica como un directorio HTTP anónimo.
+
 Para detener la base de datos, ejecuta `docker compose down`. Para eliminar también los datos locales, ejecuta `docker compose down -v`.
 
 ## Estructura inicial
@@ -59,3 +62,7 @@ El contrato canónico vive en [`openapi/openapi.yaml`](openapi/openapi.yaml). An
 
 - No subir `.env`, secretos ni credenciales AWS al repositorio.
 - Usar solo datos de prueba hasta definir las condiciones institucionales para información clínica real.
+
+## Flujo interno
+
+Los usuarios `estudiante` y `profesor` asignados pueden consultar `GET /api/v1/internal/cases`, solicitar la descarga de un `INPUT`, crear una intención en `POST /api/v1/internal/cases/{caseId}/result-uploads` y confirmar en `POST /api/v1/files/{fileId}/complete`. La confirmación valida el objeto, evita duplicados y asocia el resultado junto con la auditoría y el cambio de estado en una transacción.

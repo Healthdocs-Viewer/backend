@@ -12,6 +12,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
 
 @RestController
 @Profile({"local", "dev", "test"})
@@ -39,5 +42,15 @@ public class LocalDevUploadController {
         return stored
                 ? ResponseEntity.ok().build()
                 : ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+    }
+
+    @GetMapping("/api/v1/dev/downloads/{*objectKey}")
+    public ResponseEntity<ByteArrayResource> download(
+            @PathVariable String objectKey, @RequestParam String token) {
+        String normalizedKey = objectKey.startsWith("/") ? objectKey.substring(1) : objectKey;
+        byte[] bytes = storage.readObject(normalizedKey, token);
+        if (bytes == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment")
+                .body(new ByteArrayResource(bytes));
     }
 }
