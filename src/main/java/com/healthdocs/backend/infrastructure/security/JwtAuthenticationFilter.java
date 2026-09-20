@@ -9,6 +9,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.filter.OncePerRequestFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -17,6 +19,8 @@ import jakarta.servlet.http.HttpServletResponse;
 
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
     private final AuthProvider authProvider;
 
@@ -42,7 +46,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                         new SimpleGrantedAuthority("ACCOUNT_ENABLED"))
                                 : java.util.List.of(new SimpleGrantedAuthority("ACCOUNT_DISABLED")));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
-            } catch (JwtException | IllegalArgumentException | InvalidAuthenticationTokenException ignored) {
+            } catch (JwtException | IllegalArgumentException | InvalidAuthenticationTokenException exception) {
+                log.warn("JWT rejected for {} {}: {}", request.getMethod(), request.getRequestURI(), exception.getClass().getSimpleName());
                 SecurityContextHolder.clearContext();
             }
         }

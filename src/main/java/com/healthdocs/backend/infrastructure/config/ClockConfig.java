@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 @Configuration
-@EnableConfigurationProperties(InternalFlowProperties.class)
+@EnableConfigurationProperties({InternalFlowProperties.class, SqsNotificationProperties.class})
 public class ClockConfig {
 
     @Bean

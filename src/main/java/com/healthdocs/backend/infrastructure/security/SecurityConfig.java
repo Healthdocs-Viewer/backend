@@ -10,6 +10,10 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import java.util.List;
 import java.util.UUID;
 
 @Configuration
@@ -22,10 +26,13 @@ public class SecurityConfig {
             JwtAuthenticationFilter jwtAuthenticationFilter) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/api/v1/auth/login", "/actuator/health", "/actuator/health/**").permitAll()
-                        .requestMatchers("/api/v1/dev/uploads/**").permitAll()
+                        // Las URLs locales de storage llevan su propio token temporal.
+                        // Se abren en una pestaña nueva, por lo que no reciben el Bearer del frontend.
+                        .requestMatchers("/api/v1/dev/uploads/**", "/api/v1/dev/downloads/**").permitAll()
                         .requestMatchers("/api/v1/cases/**").hasRole("PACIENTE")
                         .requestMatchers("/api/v1/internal/**").hasAnyRole("ESTUDIANTE", "PROFESOR")
                         .requestMatchers("/api/v1/operations/**").hasRole("PROFESOR")
@@ -38,6 +45,21 @@ public class SecurityConfig {
                                 writeError(response, 403, "FORBIDDEN", "Access denied")))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
+    }
+
+    @Bean
+    CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.of(
+                "http://localhost:3000",
+                "http://localhost:4173"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        configuration.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
     }
 
     private static void writeError(
