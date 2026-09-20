@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -57,6 +58,40 @@ class PatientCaseControllerIntegrationTest {
 
     @MockBean
     private ConfirmFileUploadUseCase confirmFileUpload;
+
+    @MockBean
+    private ListPatientCasesUseCase listPatientCases;
+
+    @Test
+    void listsCasesForAuthenticatedPatient() throws Exception {
+        UUID patientId = UUID.randomUUID();
+        UUID caseId = UUID.randomUUID();
+        when(listPatientCases.execute(any())).thenReturn(List.of(
+                new ListPatientCasesUseCase.CaseView(
+                        caseId, "CAS-001", "TAC", CaseStatus.CREATED, NOW)));
+
+        mockMvc.perform(get("/api/v1/cases")
+                        .with(authentication(patientAuth(patientId))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(caseId.toString()))
+                .andExpect(jsonPath("$[0].referenceCode").value("CAS-001"));
+    }
+
+    @Test
+    void rejectsUnauthenticatedCaseList() throws Exception {
+        mockMvc.perform(get("/api/v1/cases"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rejectsInternalRolesFromCaseList() throws Exception {
+        mockMvc.perform(get("/api/v1/cases")
+                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.ESTUDIANTE))))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/cases")
+                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.PROFESOR))))
+                .andExpect(status().isForbidden());
+    }
 
     @Test
     void createsCaseWithPatientAuthentication() throws Exception {
@@ -145,8 +180,8 @@ class PatientCaseControllerIntegrationTest {
         mockMvc.perform(post("/api/v1/files/{fileId}/complete", fileId)
                         .with(authentication(patientAuth(patientId))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(fileId.toString()))
-                .andExpect(jsonPath("$.originalFilename").value("rx.dcm"));
+                .andExpect(jsonPath("$.file.id").value(fileId.toString()))
+                .andExpect(jsonPath("$.file.originalFilename").value("rx.dcm"));
     }
 
     @Test
@@ -190,6 +225,33 @@ class PatientCaseControllerIntegrationTest {
                         .contentType("application/dicom")
                         .content("dicom-bytes"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void localDevDownloadReturnsStoredBytesAndRejectsExpiredGrant() throws Exception {
+        String objectKey = "result/%s/%s".formatted(UUID.randomUUID(), UUID.randomUUID());
+        StoragePort.UploadUrlResult uploadUrl = localStorage.generateUploadUrl(objectKey, "application/pdf", 15);
+        URI uploadUri = URI.create(uploadUrl.uploadUrl());
+
+        mockMvc.perform(put(uploadUri.getRawPath() + "?" + uploadUri.getRawQuery())
+                        .contentType(MediaType.APPLICATION_PDF)
+                        .content("resultado-local"))
+                .andExpect(status().isOk());
+
+        StoragePort.UploadUrlResult downloadUrl = localStorage.generateDownloadUrl(objectKey, "application/pdf", 10);
+        URI downloadUri = URI.create(downloadUrl.uploadUrl());
+        mockMvc.perform(get(downloadUri.getRawPath() + "?" + downloadUri.getRawQuery()))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .bytes("resultado-local".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                                org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("resultado.pdf"))));
+
+        StoragePort.UploadUrlResult expired = localStorage.generateDownloadUrl(objectKey, "application/pdf", 0);
+        URI expiredUri = URI.create(expired.uploadUrl());
+        mockMvc.perform(get(expiredUri.getRawPath() + "?" + expiredUri.getRawQuery()))
+                .andExpect(status().isNotFound());
     }
 
     private static UsernamePasswordAuthenticationToken patientAuth(UUID patientId) {

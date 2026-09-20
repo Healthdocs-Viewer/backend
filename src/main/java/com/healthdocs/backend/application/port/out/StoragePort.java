@@ -11,6 +11,7 @@ public interface StoragePort {
     }
 
     boolean objectExists(String objectKey);
+    default void deleteObject(String objectKey) { }
 
     record UploadUrlResult(String uploadUrl, Instant expiresAt) {
     }

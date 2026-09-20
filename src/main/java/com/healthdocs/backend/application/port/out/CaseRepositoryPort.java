@@ -7,12 +7,15 @@ import com.healthdocs.backend.domain.model.StoredFile;
 import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.List;
 
 public interface CaseRepositoryPort {
 
     MedicalCase saveCase(MedicalCase medicalCase);
 
     Optional<MedicalCase> findCaseById(UUID caseId);
+
+    List<MedicalCase> findAllByPatientId(UUID patientId);
 
     boolean existsCaseByIdAndPatientId(UUID caseId, UUID patientId);
 

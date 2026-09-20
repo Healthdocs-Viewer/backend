@@ -6,6 +6,7 @@ import com.healthdocs.backend.application.service.ConfirmFileUploadUseCase;
 import com.healthdocs.backend.application.service.CreateCaseUseCase;
 import com.healthdocs.backend.application.service.GenerateUploadUrlUseCase;
 import com.healthdocs.backend.application.service.InternalFlowService;
+import com.healthdocs.backend.application.service.ListPatientCasesUseCase;
 import com.healthdocs.backend.domain.model.CaseConsent;
 import com.healthdocs.backend.domain.model.CaseStatus;
 import com.healthdocs.backend.domain.model.FileKind;
@@ -16,6 +17,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -35,18 +37,28 @@ public class PatientCaseController {
     private final GenerateUploadUrlUseCase generateUploadUrl;
     private final ConfirmFileUploadUseCase confirmFileUpload;
     private final InternalFlowService internalFlow;
+    private final ListPatientCasesUseCase listPatientCases;
 
     public PatientCaseController(
             CreateCaseUseCase createCase,
             AcceptTermsUseCase acceptTerms,
             GenerateUploadUrlUseCase generateUploadUrl,
             ConfirmFileUploadUseCase confirmFileUpload,
-            InternalFlowService internalFlow) {
+            InternalFlowService internalFlow,
+            ListPatientCasesUseCase listPatientCases) {
         this.createCase = createCase;
         this.acceptTerms = acceptTerms;
         this.generateUploadUrl = generateUploadUrl;
         this.confirmFileUpload = confirmFileUpload;
         this.internalFlow = internalFlow;
+        this.listPatientCases = listPatientCases;
+    }
+
+    @org.springframework.web.bind.annotation.GetMapping("/cases")
+    @PreAuthorize("hasRole('PACIENTE')")
+    public List<ListPatientCasesUseCase.CaseView> listCases(
+            @AuthenticationPrincipal AuthenticatedUser user) {
+        return listPatientCases.execute(user);
     }
 
     @PostMapping("/cases")
@@ -68,6 +80,14 @@ public class PatientCaseController {
         CaseConsent consent = acceptTerms.execute(new AcceptTermsUseCase.Command(
                 user.id(), user.role(), user.enabled(), caseId, request.termsVersion()));
         return ResponseEntity.status(HttpStatus.CREATED).body(ConsentResponse.from(consent));
+    }
+
+    @org.springframework.web.bind.annotation.GetMapping("/cases/{caseId}/result")
+    @PreAuthorize("hasRole('PACIENTE') and hasAuthority('ACCOUNT_ENABLED')")
+    public InternalFlowService.PatientResult getResult(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable UUID caseId) {
+        return internalFlow.patientResult(user, caseId);
     }
 
     @PostMapping("/cases/{caseId}/uploads")
@@ -96,7 +116,7 @@ public class PatientCaseController {
         }
         StoredFile file = confirmFileUpload.execute(new ConfirmFileUploadUseCase.Command(
                 user.id(), user.role(), user.enabled(), fileId));
-        return ResponseEntity.ok(FileResponse.from(file));
+        return ResponseEntity.ok(new CompleteUploadResponse(FileResponse.from(file), null, CaseStatus.FILES_RECEIVED));
     }
 
     public record CreateCaseRequest(@NotBlank String studyType) {
@@ -155,5 +175,8 @@ public class PatientCaseController {
             return new UploadIntentResponse(
                     FileResponse.from(result.file()), result.uploadUrl(), result.expiresAt());
         }
+    }
+
+    public record CompleteUploadResponse(FileResponse file, Object result, CaseStatus caseStatus) {
     }
 }

@@ -18,6 +18,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -149,6 +150,11 @@ class PatientFlowUseCasesTest {
         @Override
         public Optional<MedicalCase> findCaseById(UUID caseId) {
             return Optional.ofNullable(cases.get(caseId));
+        }
+
+        @Override
+        public List<MedicalCase> findAllByPatientId(UUID patientId) {
+            return cases.values().stream().filter(c -> c.patientId().equals(patientId)).toList();
         }
 
         @Override

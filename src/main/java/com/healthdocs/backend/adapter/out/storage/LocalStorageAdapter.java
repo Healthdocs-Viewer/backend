@@ -107,6 +107,16 @@ public class LocalStorageAdapter implements StoragePort {
         } catch (java.io.IOException | RuntimeException ex) { log.warn("Failed to read objectKey={}", objectKey, ex); return null; }
     }
 
+    @Override
+    public void deleteObject(String objectKey) {
+        try {
+            Files.deleteIfExists(safePath(objectKey));
+            knownObjects.remove(objectKey);
+        } catch (java.io.IOException | RuntimeException ex) {
+            log.warn("Failed to delete objectKey={}", objectKey, ex);
+        }
+    }
+
     private Path safePath(String objectKey) {
         Path target = root.resolve(objectKey).normalize();
         if (!target.startsWith(root) || objectKey == null || objectKey.isBlank()) throw new IllegalArgumentException("Invalid object key");
