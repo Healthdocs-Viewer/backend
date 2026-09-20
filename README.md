@@ -66,3 +66,25 @@ El contrato canónico vive en [`openapi/openapi.yaml`](openapi/openapi.yaml). An
 ## Flujo interno
 
 Los usuarios `estudiante` y `profesor` asignados pueden consultar `GET /api/v1/internal/cases`, solicitar la descarga de un `INPUT`, crear una intención en `POST /api/v1/internal/cases/{caseId}/result-uploads` y confirmar en `POST /api/v1/files/{fileId}/complete`. La confirmación valida el objeto, evita duplicados y asocia el resultado junto con la auditoría y el cambio de estado en una transacción.
+
+## Notificaciones SQS de resultados
+
+El adaptador SQS está desactivado por defecto. Las credenciales se resuelven
+mediante la cadena estándar del AWS SDK (variables, perfil local o rol de
+ejecución); nunca se configuran en el código.
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `HEALTHDOCS_SQS_ENABLED` | `false` | Activa el adaptador SQS |
+| `AWS_REGION` | `us-east-1` | Región AWS |
+| `HEALTHDOCS_SQS_QUEUE_NAME` | `result-available-dev` | Nombre de la cola |
+| `HEALTHDOCS_SQS_ENDPOINT` | vacío | Endpoint opcional de LocalStack/pruebas |
+| `HEALTHDOCS_SQS_TIMEOUT` | `5s` | Timeout por llamada |
+| `HEALTHDOCS_SQS_MAX_RETRIES` | `3` | Reintentos de errores temporales |
+| `HEALTHDOCS_SQS_RETRY_DELAY` | `250ms` | Espera entre reintentos |
+
+El mensaje JSON contiene `eventVersion`, `eventType`, `eventId`, `resultId`,
+`caseId`, `patientId`, `patientEmail`, `availableAt`, `eventTimestamp` y
+`publishedBy`. No incluye datos clínicos, URLs, tokens ni credenciales. La cola
+estándar no ofrece deduplicación nativa: `eventId` se conserva para que el
+consumidor del paso 5 pueda deduplicar.
