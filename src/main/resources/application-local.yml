@@ -9,6 +9,10 @@ spring:
     init:
       mode: always
       data-locations: classpath:db/seed/local/V1__local_test_accounts.sql
+  flyway:
+    # V3 es una migración local de datos y puede aparecer después de V4
+    # en bases locales creadas con versiones anteriores del proyecto.
+    out-of-order: true
 
 app:
   auth-provider: ${AUTH_PROVIDER:local}
