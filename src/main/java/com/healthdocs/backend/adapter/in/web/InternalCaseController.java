@@ -22,6 +22,8 @@ public class InternalCaseController {
     public InternalCaseController(InternalFlowService flow){this.flow=flow;}
     @GetMapping("/internal/cases") public List<InternalFlowService.CaseView> list(@AuthenticationPrincipal AuthenticatedUser user){return flow.list(user);}
     @PostMapping("/internal/cases/{caseId}/files/{fileId}/download") public InternalFlowService.Download download(@AuthenticationPrincipal AuthenticatedUser user,@PathVariable UUID caseId,@PathVariable UUID fileId){return flow.download(user,caseId,fileId);}
+    @PostMapping("/internal/cases/{caseId}/results/{resultId}/download") public InternalFlowService.Download downloadResult(@AuthenticationPrincipal AuthenticatedUser user,@PathVariable UUID caseId,@PathVariable UUID resultId){return flow.downloadResult(user,caseId,resultId);}
+    @DeleteMapping("/internal/cases/{caseId}/results/{resultId}") public ResponseEntity<Void> deleteResult(@AuthenticationPrincipal AuthenticatedUser user,@PathVariable UUID caseId,@PathVariable UUID resultId){flow.deleteResult(user,caseId,resultId);return ResponseEntity.noContent().build();}
     @PostMapping("/internal/cases/{caseId}/result-uploads") public ResponseEntity<InternalFlowService.UploadIntent> create(@AuthenticationPrincipal AuthenticatedUser user,@PathVariable UUID caseId,@Valid @RequestBody Request request){return ResponseEntity.status(HttpStatus.CREATED).body(flow.createResult(user,caseId,request.originalFilename(),request.contentType(),request.sizeBytes()));}
     public record Request(@NotBlank String originalFilename,@NotBlank String contentType,@NotNull @Positive Long sizeBytes){}
 }

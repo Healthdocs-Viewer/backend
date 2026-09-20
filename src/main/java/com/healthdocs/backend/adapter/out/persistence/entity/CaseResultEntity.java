@@ -40,6 +40,9 @@ public class CaseResultEntity {
     @Column(name = "available_at")
     private Instant availableAt;
 
+    @Column(name = "available_by")
+    private UUID availableBy;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -84,6 +87,14 @@ public class CaseResultEntity {
     public Instant getAvailableAt() {
         return availableAt;
     }
+
+    public void makeAvailable(Instant at, UUID userId) {
+        this.status = ResultStatus.AVAILABLE;
+        this.availableAt = at;
+        this.availableBy = userId;
+    }
+
+    public UUID getAvailableBy() { return availableBy; }
 
     public Instant getCreatedAt() {
         return createdAt;

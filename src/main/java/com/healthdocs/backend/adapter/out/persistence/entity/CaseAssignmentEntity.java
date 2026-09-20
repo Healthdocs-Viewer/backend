@@ -30,6 +30,11 @@ public class CaseAssignmentEntity {
     protected CaseAssignmentEntity() {
     }
 
+    public CaseAssignmentEntity(UUID caseId, UUID userId) {
+        this.caseId = caseId;
+        this.userId = userId;
+    }
+
     public static class AssignmentId implements Serializable {
         private UUID caseId;
         private UUID userId;

@@ -15,7 +15,10 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.List;
 import org.springframework.stereotype.Component;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 
 @Component
 public class JpaCaseRepositoryAdapter implements CaseRepositoryPort {
@@ -24,6 +27,9 @@ public class JpaCaseRepositoryAdapter implements CaseRepositoryPort {
     private final StoredFileRepository files;
     private final CaseConsentRepository consents;
     private final AppUserRepository users;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public JpaCaseRepositoryAdapter(
             MedicalCaseRepository cases,
@@ -40,21 +46,33 @@ public class JpaCaseRepositoryAdapter implements CaseRepositoryPort {
     public MedicalCase saveCase(MedicalCase medicalCase) {
         AppUserEntity patient = users.findById(medicalCase.patientId())
                 .orElseThrow(() -> new ResourceNotFoundException("Patient not found"));
-        MedicalCaseEntity entity = cases.findById(medicalCase.id())
-                .orElseGet(() -> new MedicalCaseEntity(
-                        medicalCase.id(),
-                        patient,
-                        medicalCase.status(),
-                        medicalCase.referenceCode(),
-                        medicalCase.studyType()));
+        Optional<MedicalCaseEntity> existing = cases.findById(medicalCase.id());
+        MedicalCaseEntity entity = existing.orElseGet(() -> new MedicalCaseEntity(
+                medicalCase.id(),
+                patient,
+                medicalCase.status(),
+                medicalCase.referenceCode(),
+                medicalCase.studyType()));
         entity.setStatus(medicalCase.status());
         entity.setUpdatedAt(medicalCase.updatedAt());
-        return toDomain(cases.save(entity));
+        if (existing.isPresent()) {
+            return toDomain(cases.save(entity));
+        }
+        entityManager.persist(entity);
+        entityManager.flush();
+        return toDomain(entity);
     }
 
     @Override
     public Optional<MedicalCase> findCaseById(UUID caseId) {
         return cases.findById(caseId).map(this::toDomain);
+    }
+
+    @Override
+    public List<MedicalCase> findAllByPatientId(UUID patientId) {
+        return cases.findAllByPatientIdOrderByCreatedAtDesc(patientId).stream()
+                .map(this::toDomain)
+                .toList();
     }
 
     @Override
@@ -75,9 +93,15 @@ public class JpaCaseRepositoryAdapter implements CaseRepositoryPort {
                 .orElseThrow(() -> new ResourceNotFoundException("Case not found"));
         AppUserEntity patient = users.findById(consent.patientId())
                 .orElseThrow(() -> new ResourceNotFoundException("Patient not found"));
-        CaseConsentEntity entity = new CaseConsentEntity(
-                consent.id(), medicalCase, patient, consent.termsVersion(), consent.acceptedAt());
-        return toDomain(consents.save(entity));
+        Optional<CaseConsentEntity> existing = consents.findById(consent.id());
+        CaseConsentEntity entity = existing.orElseGet(() -> new CaseConsentEntity(
+                consent.id(), medicalCase, patient, consent.termsVersion(), consent.acceptedAt()));
+        if (existing.isPresent()) {
+            return toDomain(consents.save(entity));
+        }
+        entityManager.persist(entity);
+        entityManager.flush();
+        return toDomain(entity);
     }
 
     @Override
@@ -94,8 +118,8 @@ public class JpaCaseRepositoryAdapter implements CaseRepositoryPort {
     public StoredFile saveFile(StoredFile file) {
         MedicalCaseEntity medicalCase = cases.findById(file.caseId())
                 .orElseThrow(() -> new ResourceNotFoundException("Case not found"));
-        StoredFileEntity entity = files.findById(file.id())
-                .orElseGet(() -> new StoredFileEntity(
+        Optional<StoredFileEntity> existing = files.findById(file.id());
+        StoredFileEntity entity = existing.orElseGet(() -> new StoredFileEntity(
                         file.id(),
                         medicalCase,
                         file.objectKey(),
@@ -104,7 +128,12 @@ public class JpaCaseRepositoryAdapter implements CaseRepositoryPort {
                         file.contentType(),
                         file.sizeBytes()));
         entity.setUpdatedAt(file.updatedAt());
-        return toDomain(files.save(entity));
+        if (existing.isPresent()) {
+            return toDomain(files.save(entity));
+        }
+        entityManager.persist(entity);
+        entityManager.flush();
+        return toDomain(entity);
     }
 
     @Override
