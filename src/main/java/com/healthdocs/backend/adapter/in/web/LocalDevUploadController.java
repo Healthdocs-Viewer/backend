@@ -50,7 +50,14 @@ public class LocalDevUploadController {
         String normalizedKey = objectKey.startsWith("/") ? objectKey.substring(1) : objectKey;
         byte[] bytes = storage.readObject(normalizedKey, token);
         if (bytes == null) return ResponseEntity.notFound().build();
-        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment")
+        String filename = normalizedKey.substring(normalizedKey.lastIndexOf('/') + 1);
+        String contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
+        if (filename.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) {
+            contentType = MediaType.APPLICATION_PDF_VALUE;
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .body(new ByteArrayResource(bytes));
     }
 }
