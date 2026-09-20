@@ -26,6 +26,28 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /operations/cases/pending:
+    get:
+      summary: Lista casos pendientes de habilitación
+      description: |
+        Lista casos que un profesor habilitado puede seleccionar para habilitar
+        en el flujo interno. Solo expone metadatos operativos mínimos.
+        La autorización se basa en el rol PROFESOR y una cuenta habilitada;
+        no requiere una asignación previa porque esta operación inicia la asignación.
+      operationId: listPendingCases
+      responses:
+        '200':
+          description: Casos pendientes de habilitación
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InternalCaseSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /auth/login:
     post:
       summary: Inicia una sesión local de desarrollo
@@ -76,6 +98,12 @@ paths:
       summary: Crea un caso para el paciente autenticado
       operationId: createCase
       description: Solo paciente. El servidor establece al usuario autenticado como propietario.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseRequest'
       responses:
         '201':
           description: Caso creado
@@ -147,7 +175,10 @@ paths:
     post:
       summary: Crea una intención de carga de archivo de entrada
       operationId: createInputUpload
-      description: Solo paciente propietario de caseId.
+      description: |
+        Solo paciente propietario de caseId. La intención incluye `expiresAt`.
+        Mientras una intención esté vigente, no se crea una asociación de caso
+        adicional; cuando expire, el paciente puede solicitar una nueva intención.
       parameters:
         - $ref: '#/components/parameters/CaseId'
       requestBody:
@@ -169,6 +200,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Ya existe una intención vigente o la solicitud no puede repetirse en el estado actual
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /files/{fileId}/complete:
     post:
       summary: Confirma que el navegador terminó una carga directa
@@ -194,14 +231,21 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: La intención de carga expiró o la confirmación ya fue procesada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /internal/cases:
     get:
-      summary: Lista los casos habilitados para el usuario interno autenticado
+      summary: Lista los casos internos visibles para el usuario autenticado
       operationId: listAssignedCases
       description: |
-        Solo estudiante o profesor. Lista únicamente casos asignados explícitamente
-        al usuario autenticado, en estado ENABLED_FOR_PROCESSING, con al menos un
-        archivo INPUT y sin resultado ya asociado.
+        Solo estudiante o profesor con cuenta habilitada. Lista casos asignados
+        explícitamente al usuario autenticado que tengan al menos un archivo INPUT
+        y estén en ENABLED_FOR_PROCESSING, RESULT_UPLOADED o RESULT_AVAILABLE.
+        Cuando existe un resultado, incluye su resumen en la propiedad result.
       responses:
         '200':
           description: Casos habilitados
@@ -217,9 +261,14 @@ paths:
           $ref: '#/components/responses/Forbidden'
   /internal/cases/{caseId}/files/{fileId}/download:
     post:
-      summary: Crea una intención de descarga para un archivo habilitado
+      summary: Crea una intención de descarga para un archivo INPUT visible
       operationId: createInputDownload
-      description: Solo estudiante o profesor habilitado para caseId; fileId debe ser INPUT y pertenecer a ese caso.
+      description: |
+        Solo estudiante o profesor con cuenta habilitada. Un usuario interno asignado
+        puede descargar INPUT cuando el caso está ENABLED_FOR_PROCESSING, RESULT_UPLOADED
+        o RESULT_AVAILABLE. Un profesor puede descargar INPUT de un caso FILES_RECEIVED
+        aunque todavía no tenga una asignación previa. fileId debe ser INPUT y pertenecer
+        al caso.
       parameters:
         - $ref: '#/components/parameters/CaseId'
         - $ref: '#/components/parameters/FileId'
@@ -236,11 +285,65 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /internal/cases/{caseId}/results/{resultId}/download:
+    post:
+      summary: Crea una intención de descarga para un resultado
+      operationId: createResultDownload
+      description: |
+        Solo estudiante o profesor con cuenta habilitada y asignación explícita
+        del caso. El resultado debe pertenecer al caso indicado y puede estar
+        UPLOADED o AVAILABLE.
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/ResultId'
+      responses:
+        '200':
+          description: URL temporal creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadIntent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /internal/cases/{caseId}/results/{resultId}:
+    delete:
+      summary: Elimina un resultado no publicado y devuelve el caso a procesamiento
+      operationId: deleteResult
+      description: |
+        Solo estudiante o profesor con cuenta habilitada y asignación explícita
+        del caso. Solo puede eliminarse un resultado UPLOADED. La operación elimina
+        la asociación y el archivo RESULT, y transiciona el caso a
+        ENABLED_FOR_PROCESSING. Un resultado AVAILABLE no puede eliminarse.
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/ResultId'
+      responses:
+        '204':
+          description: Resultado eliminado y caso devuelto a procesamiento
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El resultado ya fue publicado y no puede eliminarse
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /internal/cases/{caseId}/result-uploads:
     post:
       summary: Crea una intención de carga de resultado externo
       operationId: createResultUpload
-      description: Solo estudiante o profesor habilitado para caseId.
+      description: |
+        Solo estudiante o profesor con cuenta habilitada y asignación explícita
+        para caseId. La intención incluye `expiresAt`; mientras esté vigente
+        no crea `case_result`. Una intención expirada permite solicitar otra.
       parameters:
         - $ref: '#/components/parameters/CaseId'
       requestBody:
@@ -263,7 +366,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: El caso no está habilitado para procesamiento o ya tiene resultado asociado
+          description: El caso no está habilitado, ya tiene resultado, existe una intención vigente o la confirmación llegó después de expirar
           content:
             application/json:
               schema:
@@ -280,14 +383,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /operations/users/internal:
+    get:
+      summary: Lista usuarios internos habilitados
+      description: Solo un profesor con cuenta habilitada puede consultar estudiantes y profesores habilitados.
+      operationId: listInternalUsers
+      responses:
+        '200':
+          description: Catálogo mínimo de usuarios internos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InternalUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /operations/cases/{caseId}/assignments:
     post:
-      summary: Habilita temporalmente un caso para un usuario interno
+      summary: Habilita un caso y asigna acceso a un usuario interno
       description: |
-        Regla provisional de desarrollo local: solo profesor ya habilitado para caseId
-        puede habilitar a otro estudiante o profesor. La habilitación inicial del profesor
-        se prepara en los datos de prueba locales; el rol no permite acceder a casos ajenos.
-        El rol responsable definitivo sigue pendiente de validación.
+        Solo un profesor con cuenta habilitada que ya tenga acceso al caso puede ejecutar
+        la operación. La operación crea la asignación del usuario indicado y conserva
+        también la asignación del profesor ejecutor. El destinatario puede ser estudiante
+        o profesor habilitado. La habilitación inicial del profesor se prepara en los datos
+        de prueba locales.
       operationId: assignCase
       parameters:
         - $ref: '#/components/parameters/CaseId'
@@ -313,26 +435,39 @@ paths:
     post:
       summary: Marca un resultado como disponible
       description: |
-        Regla provisional de desarrollo local: solo profesor habilitado para el caso
-        al que pertenece resultId. El servidor resuelve y verifica esa relación.
-        La regla y el responsable definitivos siguen pendientes de validación.
+        Publica el resultado asociado a resultId. Solo un profesor con cuenta
+        habilitada y asignación explícita al caso puede ejecutar la operación.
+        El servidor resuelve el caso desde resultId y exige la transición atómica
+        del resultado de UPLOADED a AVAILABLE y del caso de RESULT_UPLOADED a
+        RESULT_AVAILABLE. La operación es idempotente solo en el sentido de que
+        una publicación repetida se rechaza; no vuelve a publicar un resultado.
+
+        La publicación registra availableAt. La notificación asíncrona es un
+        detalle interno de infraestructura y no tiene endpoint ni payload HTTP
+        público en esta versión; no se debe asumir que esta respuesta expone un
+        evento de notificación.
       operationId: makeResultAvailable
       parameters:
         - $ref: '#/components/parameters/ResultId'
       responses:
         '204':
-          description: Resultado disponible y evento de notificación publicado
+          description: Resultado disponible; no se devuelve un payload ni un evento HTTP
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /cases/{caseId}/result:
     get:
       summary: Obtiene una intención de descarga del resultado disponible del paciente
       operationId: getPatientResult
       description: Solo paciente propietario de caseId; el resultado debe pertenecer a ese caso y estar disponible.
+        La respuesta no contiene datos clínicos. La URL de descarga es temporal y su
+        duración se configura en el backend. Si el caso o resultado aún no está
+        publicado, responde 409; nunca se emite la URL antes de la disponibilidad.
       parameters:
         - $ref: '#/components/parameters/CaseId'
       responses:
@@ -348,6 +483,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 components:
   securitySchemes:
     bearerAuth:
@@ -402,6 +539,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: La operación no es válida para el estado actual del recurso o la transición solicitada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     ValidationError:
       description: Datos de entrada inválidos
       content:
@@ -409,6 +552,18 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    InternalUser:
+      type: object
+      required: [id, email, role]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/UserRole'
     LoginRequest:
       type: object
       additionalProperties: false
@@ -441,6 +596,10 @@ components:
     CaseStatus:
       type: string
       enum: [CREATED, FILES_RECEIVED, ENABLED_FOR_PROCESSING, RESULT_UPLOADED, RESULT_AVAILABLE]
+    ResultStatus:
+      type: string
+      description: Estado del resultado; la publicación válida solo permite UPLOADED a AVAILABLE.
+      enum: [UPLOADED, AVAILABLE]
     UserProfile:
       type: object
       required: [id, email, role, enabled]
@@ -482,9 +641,20 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/FileSummary'
+            result:
+              description: Resumen del resultado asociado, cuando existe.
+              $ref: '#/components/schemas/ResultSummary'
+    CreateCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [studyType]
+      properties:
+        studyType:
+          type: string
+          minLength: 1
     FileSummary:
       type: object
-      required: [id, originalFilename, fileKind]
+      required: [id, originalFilename, sizeBytes, fileKind]
       properties:
         id:
           type: string
@@ -522,12 +692,31 @@ components:
           type: string
           format: uuid
         status:
-          type: string
-          enum: [UPLOADED, AVAILABLE]
+          $ref: '#/components/schemas/ResultStatus'
         uploadedBy:
           type: string
           format: uuid
         uploadedAt:
+          type: string
+          format: date-time
+    ResultSummary:
+      type: object
+      required: [id, originalFilename, status, uploadedBy, uploadedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        originalFilename:
+          type: string
+        status:
+          $ref: '#/components/schemas/ResultStatus'
+        uploadedBy:
+          type: string
+          format: uuid
+        uploadedAt:
+          type: string
+          format: date-time
+        availableAt:
           type: string
           format: date-time
     CreateUploadIntentRequest:
