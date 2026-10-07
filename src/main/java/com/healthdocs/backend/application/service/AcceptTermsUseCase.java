@@ -40,7 +40,7 @@ public class AcceptTermsUseCase {
     }
 
     static void requirePatient(UUID patientId, Role role, boolean enabled) {
-        if (patientId == null || !enabled || role != Role.PACIENTE) {
+        if (patientId == null || !enabled || role != Role.PATIENT) {
             throw new ForbiddenOperationException("Only enabled patients can operate on patient cases");
         }
     }

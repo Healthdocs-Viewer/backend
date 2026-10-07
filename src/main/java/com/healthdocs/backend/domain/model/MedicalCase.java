@@ -9,7 +9,7 @@ public class MedicalCase {
     private final UUID id;
     private final UUID patientId;
     private final String referenceCode;
-    private final String studyType;
+    private final String studyName;
     private CaseStatus status;
     private final Instant createdAt;
     private Instant updatedAt;
@@ -18,21 +18,21 @@ public class MedicalCase {
             UUID id,
             UUID patientId,
             String referenceCode,
-            String studyType,
+            String studyName,
             CaseStatus status,
             Instant createdAt,
             Instant updatedAt) {
         this.id = Objects.requireNonNull(id, "id is required");
         this.patientId = Objects.requireNonNull(patientId, "patientId is required");
         this.referenceCode = requireText(referenceCode, "referenceCode");
-        this.studyType = requireText(studyType, "studyType");
+        this.studyName = requireText(studyName, "studyName");
         this.status = Objects.requireNonNull(status, "status is required");
         this.createdAt = Objects.requireNonNull(createdAt, "createdAt is required");
         this.updatedAt = Objects.requireNonNull(updatedAt, "updatedAt is required");
     }
 
-    public static MedicalCase create(UUID id, UUID patientId, String referenceCode, String studyType, Instant now) {
-        return new MedicalCase(id, patientId, referenceCode, studyType, CaseStatus.CREATED, now, now);
+    public static MedicalCase create(UUID id, UUID patientId, String referenceCode, String studyName, Instant now) {
+        return new MedicalCase(id, patientId, referenceCode, studyName, CaseStatus.CREATED, now, now);
     }
 
     public void transitionTo(CaseStatus next, Instant now) {
@@ -56,8 +56,8 @@ public class MedicalCase {
         return referenceCode;
     }
 
-    public String studyType() {
-        return studyType;
+    public String studyName() {
+        return studyName;
     }
 
     public CaseStatus status() {

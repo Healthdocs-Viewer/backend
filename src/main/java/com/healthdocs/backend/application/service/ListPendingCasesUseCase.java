@@ -25,9 +25,9 @@ public class ListPendingCasesUseCase {
     }
 
     @Transactional(readOnly = true)
-    public List<PendingCaseView> execute(AuthenticatedUser professor) {
-        if (professor == null || !professor.enabled() || professor.role() != Role.PROFESOR) {
-            throw new ForbiddenOperationException("Only enabled professors can list pending cases");
+    public List<PendingCaseView> execute(AuthenticatedUser coordinator) {
+        if (coordinator == null || !coordinator.enabled() || coordinator.role() != Role.COORDINATOR) {
+            throw new ForbiddenOperationException("Only enabled coordinators can list pending cases");
         }
         return cases.findPendingCases(CaseStatus.FILES_RECEIVED).stream()
                 .map(this::toView)
@@ -47,7 +47,7 @@ public class ListPendingCasesUseCase {
         return new PendingCaseView(
                 c.getId(),
                 c.getReferenceCode(),
-                c.getStudyType(),
+                c.getStudyName(),
                 c.getStatus(),
                 c.getCreatedAt(),
                 fileViews);
@@ -64,7 +64,7 @@ public class ListPendingCasesUseCase {
     public record PendingCaseView(
             UUID id,
             String referenceCode,
-            String studyType,
+            String studyName,
             CaseStatus status,
             Instant createdAt,
             List<FileView> files) {

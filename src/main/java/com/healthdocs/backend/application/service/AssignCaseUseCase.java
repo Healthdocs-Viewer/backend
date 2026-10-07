@@ -33,9 +33,9 @@ public class AssignCaseUseCase {
     }
 
     @Transactional
-    public void execute(AuthenticatedUser professor, UUID caseId, UUID targetUserId) {
-        if (professor == null || !professor.enabled() || professor.role() != Role.PROFESOR) {
-            throw new ForbiddenOperationException("Only enabled professors can assign cases");
+    public void execute(AuthenticatedUser coordinator, UUID caseId, UUID targetUserId) {
+        if (coordinator == null || !coordinator.enabled() || coordinator.role() != Role.COORDINATOR) {
+            throw new ForbiddenOperationException("Only enabled coordinators can assign cases");
         }
         MedicalCaseEntity medicalCase = cases.findById(caseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Case not found"));
@@ -47,13 +47,13 @@ public class AssignCaseUseCase {
         }
         var target = users.findById(targetUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-        if (!target.isEnabled() || (target.getRole() != Role.ESTUDIANTE && target.getRole() != Role.PROFESOR)) {
+        if (!target.isEnabled() || (target.getRole() != Role.RESEARCHER && target.getRole() != Role.COORDINATOR)) {
             throw new ForbiddenOperationException("Target user is not an enabled internal user");
         }
-        // El profesor que habilita el caso también debe conservar acceso operativo
+        // El coordinador que habilita el caso también debe conservar acceso operativo
         // para descargar el insumo, cargar el resultado y publicarlo.
-        if (!assignments.existsByCaseIdAndUserId(caseId, professor.id())) {
-            assignments.save(new CaseAssignmentEntity(caseId, professor.id()));
+        if (!assignments.existsByCaseIdAndUserId(caseId, coordinator.id())) {
+            assignments.save(new CaseAssignmentEntity(caseId, coordinator.id()));
         }
         if (!assignments.existsByCaseIdAndUserId(caseId, targetUserId)) {
             assignments.save(new CaseAssignmentEntity(caseId, targetUserId));

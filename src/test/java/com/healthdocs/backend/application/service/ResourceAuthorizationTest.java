@@ -34,7 +34,7 @@ class ResourceAuthorizationTest {
         UUID patientId = UUID.randomUUID();
         UUID caseId = UUID.randomUUID();
         UUID fileId = UUID.randomUUID();
-        AuthenticatedUser patient = new AuthenticatedUser(patientId, "p@x.test", Role.PACIENTE, true);
+        AuthenticatedUser patient = new AuthenticatedUser(patientId, "p@x.test", Role.PATIENT, true);
         when(cases.existsByIdAndPatientId(caseId, patientId)).thenReturn(true);
         when(files.existsByIdAndMedicalCaseId(fileId, caseId)).thenReturn(true);
 
@@ -47,19 +47,19 @@ class ResourceAuthorizationTest {
     void studentRequiresExplicitAssignment() {
         UUID userId = UUID.randomUUID();
         UUID caseId = UUID.randomUUID();
-        AuthenticatedUser student = new AuthenticatedUser(userId, "s@x.test", Role.ESTUDIANTE, true);
+        AuthenticatedUser researcher = new AuthenticatedUser(userId, "s@x.test", Role.RESEARCHER, true);
         when(assignments.existsByCaseIdAndUserId(caseId, userId)).thenReturn(false);
-        assertFalse(authorization.canAccessCase(student, caseId));
+        assertFalse(authorization.canAccessCase(researcher, caseId));
         when(assignments.existsByCaseIdAndUserId(caseId, userId)).thenReturn(true);
-        assertTrue(authorization.canAccessCase(student, caseId));
+        assertTrue(authorization.canAccessCase(researcher, caseId));
     }
 
     @Test
     void onlyProfessorCanAssignAndPublish() {
         AuthenticatedUser professor = new AuthenticatedUser(
-                UUID.randomUUID(), "p@x.test", Role.PROFESOR, true);
+                UUID.randomUUID(), "p@x.test", Role.COORDINATOR, true);
         AuthenticatedUser student = new AuthenticatedUser(
-                UUID.randomUUID(), "s@x.test", Role.ESTUDIANTE, true);
+                UUID.randomUUID(), "s@x.test", Role.RESEARCHER, true);
         assertTrue(authorization.canAssignCases(professor));
         assertFalse(authorization.canAssignCases(student));
     }

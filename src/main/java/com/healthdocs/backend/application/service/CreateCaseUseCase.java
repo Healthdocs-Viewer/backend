@@ -28,18 +28,18 @@ public class CreateCaseUseCase {
     @Transactional
     public MedicalCase execute(Command command) {
         requirePatient(command);
-        String studyType = requireText(command.studyType(), "studyType");
+        String studyName = requireText(command.studyName(), "studyName");
         Instant now = clock.instant();
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
         String referenceCode = "CAS-" + REFERENCE_DATE.format(today) + "-"
                 + String.format("%04d", cases.countCasesCreatedOn(today) + 1);
         MedicalCase medicalCase = MedicalCase.create(
-                UUID.randomUUID(), command.patientId(), referenceCode, studyType, now);
+                UUID.randomUUID(), command.patientId(), referenceCode, studyName, now);
         return cases.saveCase(medicalCase);
     }
 
     private static void requirePatient(Command command) {
-        if (!command.enabled() || command.role() != Role.PACIENTE) {
+        if (!command.enabled() || command.role() != Role.PATIENT) {
             throw new ForbiddenOperationException("Only enabled patients can create cases");
         }
     }
@@ -51,6 +51,6 @@ public class CreateCaseUseCase {
         return value.trim();
     }
 
-    public record Command(UUID patientId, Role role, boolean enabled, String studyType) {
+    public record Command(UUID patientId, Role role, boolean enabled, String studyName) {
     }
 }

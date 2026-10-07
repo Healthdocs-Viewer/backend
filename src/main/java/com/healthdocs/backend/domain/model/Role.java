@@ -1,9 +1,10 @@
 package com.healthdocs.backend.domain.model;
 
 public enum Role {
-    PACIENTE("paciente"),
-    ESTUDIANTE("estudiante"),
-    PROFESOR("profesor");
+    PATIENT("patient"),
+    RESEARCHER("researcher"),
+    COORDINATOR("coordinator"),
+    ADMIN("admin");
 
     private final String value;
 

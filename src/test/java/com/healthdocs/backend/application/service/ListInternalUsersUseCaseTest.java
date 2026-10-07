@@ -25,22 +25,22 @@ class ListInternalUsersUseCaseTest {
         AppUserEntity user = mock(AppUserEntity.class);
         when(user.getId()).thenReturn(id);
         when(user.getEmail()).thenReturn("student@healthdocs.test");
-        when(user.getRole()).thenReturn(Role.ESTUDIANTE);
-        when(repository.findByEnabledTrueAndRoleInOrderByEmailAsc(List.of(Role.ESTUDIANTE, Role.PROFESOR)))
+        when(user.getRole()).thenReturn(Role.RESEARCHER);
+        when(repository.findByEnabledTrueAndRoleInOrderByEmailAsc(List.of(Role.RESEARCHER, Role.COORDINATOR)))
                 .thenReturn(List.of(user));
 
-        var result = useCase.execute(new AuthenticatedUser(UUID.randomUUID(), "professor@healthdocs.test", Role.PROFESOR, true));
+        var result = useCase.execute(new AuthenticatedUser(UUID.randomUUID(), "professor@healthdocs.test", Role.COORDINATOR, true));
 
-        assertEquals(List.of(new ListInternalUsersUseCase.InternalUser(id, "student@healthdocs.test", Role.ESTUDIANTE)), result);
-        verify(repository).findByEnabledTrueAndRoleInOrderByEmailAsc(List.of(Role.ESTUDIANTE, Role.PROFESOR));
+        assertEquals(List.of(new ListInternalUsersUseCase.InternalUser(id, "student@healthdocs.test", Role.RESEARCHER)), result);
+        verify(repository).findByEnabledTrueAndRoleInOrderByEmailAsc(List.of(Role.RESEARCHER, Role.COORDINATOR));
     }
 
     @Test
     void rejectsNonProfessorAndDisabledRequesters() {
         assertThrows(ForbiddenOperationException.class,
-                () -> useCase.execute(new AuthenticatedUser(UUID.randomUUID(), "student@test", Role.ESTUDIANTE, true)));
+                () -> useCase.execute(new AuthenticatedUser(UUID.randomUUID(), "student@test", Role.RESEARCHER, true)));
         assertThrows(ForbiddenOperationException.class,
-                () -> useCase.execute(new AuthenticatedUser(UUID.randomUUID(), "prof@test", Role.PROFESOR, false)));
+                () -> useCase.execute(new AuthenticatedUser(UUID.randomUUID(), "prof@test", Role.COORDINATOR, false)));
         verifyNoInteractions(repository);
     }
 }

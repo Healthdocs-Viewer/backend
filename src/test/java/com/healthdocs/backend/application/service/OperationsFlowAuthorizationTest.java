@@ -28,14 +28,14 @@ class OperationsFlowAuthorizationTest {
     @Test
     void nonProfessorReceivesForbiddenForPendingCases() throws Exception {
         mockMvc.perform(get("/api/v1/operations/cases/pending")
-                        .with(authentication(authToken(Role.ESTUDIANTE, true))))
+                        .with(authentication(authToken(Role.RESEARCHER, true))))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void enabledProfessorCanConsultPendingCases() throws Exception {
         mockMvc.perform(get("/api/v1/operations/cases/pending")
-                        .with(authentication(authToken(Role.PROFESOR, true))))
+                        .with(authentication(authToken(Role.COORDINATOR, true))))
                 .andExpect(status().isOk());
     }
 

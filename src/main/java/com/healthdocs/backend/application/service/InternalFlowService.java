@@ -57,7 +57,7 @@ public class InternalFlowService {
     }
     @Transactional(readOnly = true)
     public PatientResult patientResult(AuthenticatedUser user, UUID caseId) {
-        if (user == null || !user.enabled() || user.role() != Role.PACIENTE) {
+        if (user == null || !user.enabled() || user.role() != Role.PATIENT) {
             throw new ForbiddenOperationException("Patient access required");
         }
         MedicalCaseEntity medicalCase = cases.findById(caseId)
@@ -90,7 +90,7 @@ public class InternalFlowService {
     }
     @Transactional(readOnly = true)
     public Download downloadResult(AuthenticatedUser user, UUID caseId, UUID resultId) {
-        // Profesor y estudiante comparten la descarga temporal del resultado:
+        // Coordinadores e investigadores comparten la descarga temporal del resultado:
         // el acceso se limita al personal interno asignado al caso.
         requireInternal(user);
         visibleResultCase(user, caseId, resultId);
@@ -151,12 +151,12 @@ public class InternalFlowService {
     }
     @Transactional
     public void makeResultAvailable(AuthenticatedUser user, UUID resultId) {
-        requireProfessor(user);
+        requireCoordinator(user);
         CaseResultEntity result = results.findById(resultId)
                 .orElseThrow(() -> new ResourceNotFoundException("Result not found"));
         MedicalCaseEntity medicalCase = result.getMedicalCase();
         if (!assignments.existsByCaseIdAndUserId(medicalCase.getId(), user.id())) {
-            throw new ForbiddenOperationException("Professor is not assigned to this case");
+            throw new ForbiddenOperationException("Coordinator is not assigned to this case");
         }
         if (result.getStatus() != com.healthdocs.backend.domain.model.ResultStatus.UPLOADED
                 || medicalCase.getStatus() != CaseStatus.RESULT_UPLOADED) {
@@ -185,29 +185,29 @@ public class InternalFlowService {
                 || c.getStatus() == CaseStatus.RESULT_AVAILABLE;
         boolean assignedInternalCase = assignedCase
                 && assignments.existsByCaseIdAndUserId(id, user.id());
-        boolean professorReviewingPendingCase = user.role() == Role.PROFESOR
+        boolean coordinatorReviewingPendingCase = user.role() == Role.COORDINATOR
                 && c.getStatus() == CaseStatus.FILES_RECEIVED;
-        if (!assignedInternalCase && !professorReviewingPendingCase) {
+        if (!assignedInternalCase && !coordinatorReviewingPendingCase) {
             throw new ForbiddenOperationException("Case is not available");
         }
         return c;
     }
-    private void requireInternal(AuthenticatedUser u) { if(u==null || !u.enabled() || (u.role()!=Role.ESTUDIANTE && u.role()!=Role.PROFESOR)) throw new ForbiddenOperationException("Internal access required"); }
-    private void requireProfessor(AuthenticatedUser u) { if(u==null || !u.enabled() || u.role()!=Role.PROFESOR) throw new ForbiddenOperationException("Professor access required"); }
+    private void requireInternal(AuthenticatedUser u) { if(u==null || !u.enabled() || (u.role()!=Role.RESEARCHER && u.role()!=Role.COORDINATOR)) throw new ForbiddenOperationException("Internal access required"); }
+    private void requireCoordinator(AuthenticatedUser u) { if(u==null || !u.enabled() || u.role()!=Role.COORDINATOR) throw new ForbiddenOperationException("Coordinator access required"); }
     private void validate(String f,String m,Long s) { if(f==null||f.isBlank()||f.length()>255||f.contains("..")||f.contains("/")||f.contains("\\")) throw new IllegalArgumentException("Invalid originalFilename"); if(m==null||!properties.allowedMimeTypes().contains(m.split(";",2)[0].trim())) throw new UnsupportedMediaTypeException("MIME type is not allowed"); if(s==null||s<1) throw new IllegalArgumentException("sizeBytes must be positive"); if(s>properties.resultMaxSizeBytes()) throw new PayloadTooLargeException("File exceeds maximum size"); }
     private CaseView view(MedicalCaseEntity c) {
         CaseResultEntity result = results.findByMedicalCaseId(c.getId()).orElse(null);
         ResultView resultView = result == null ? null : new ResultView(
                 result.getId(), result.getFile().getOriginalFilename(), result.getStatus(),
                 result.getUploadedBy(), result.getUploadedAt(), result.getAvailableAt());
-        return new CaseView(c.getId(), c.getReferenceCode(), c.getStudyType(), c.getStatus(), c.getCreatedAt(),
+        return new CaseView(c.getId(), c.getReferenceCode(), c.getStudyName(), c.getStatus(), c.getCreatedAt(),
                 files.findByMedicalCaseId(c.getId()).stream()
                         .map(f->new FileView(f.getId(),f.getOriginalFilename(),f.getContentType(),f.getSizeBytes(),f.getFileKind())).toList(),
                 resultView);
     }
     private static String sanitize(String s){return s.replace("\\","_").replace("/","_");}
     public record FileView(UUID id,String originalFilename,String contentType,Long sizeBytes,FileKind fileKind){}
-    public record CaseView(UUID id,String referenceCode,String studyType,CaseStatus status,Instant createdAt,List<FileView> files,ResultView result){}
+    public record CaseView(UUID id,String referenceCode,String studyName,CaseStatus status,Instant createdAt,List<FileView> files,ResultView result){}
     public record ResultView(UUID id,String originalFilename,com.healthdocs.backend.domain.model.ResultStatus status,UUID uploadedBy,Instant uploadedAt,Instant availableAt){}
     public record Download(String downloadUrl,Instant expiresAt){}
     public record PatientResult(UUID id, UUID caseId, Instant availableAt, Download download){}

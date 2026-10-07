@@ -55,24 +55,24 @@ public class PatientCaseController {
     }
 
     @org.springframework.web.bind.annotation.GetMapping("/cases")
-    @PreAuthorize("hasRole('PACIENTE')")
+    @PreAuthorize("hasRole('PATIENT')")
     public List<ListPatientCasesUseCase.CaseView> listCases(
             @AuthenticationPrincipal AuthenticatedUser user) {
         return listPatientCases.execute(user);
     }
 
     @PostMapping("/cases")
-    @PreAuthorize("hasRole('PACIENTE')")
+    @PreAuthorize("hasRole('PATIENT')")
     public ResponseEntity<CaseResponse> createCase(
             @AuthenticationPrincipal AuthenticatedUser user,
             @Valid @RequestBody CreateCaseRequest request) {
         MedicalCase medicalCase = createCase.execute(new CreateCaseUseCase.Command(
-                user.id(), user.role(), user.enabled(), request.studyType()));
+                user.id(), user.role(), user.enabled(), request.studyName()));
         return ResponseEntity.status(HttpStatus.CREATED).body(CaseResponse.from(medicalCase));
     }
 
     @PostMapping("/cases/{caseId}/consent")
-    @PreAuthorize("hasRole('PACIENTE')")
+    @PreAuthorize("hasRole('PATIENT')")
     public ResponseEntity<ConsentResponse> acceptConsent(
             @AuthenticationPrincipal AuthenticatedUser user,
             @PathVariable UUID caseId,
@@ -83,7 +83,7 @@ public class PatientCaseController {
     }
 
     @org.springframework.web.bind.annotation.GetMapping("/cases/{caseId}/result")
-    @PreAuthorize("hasRole('PACIENTE') and hasAuthority('ACCOUNT_ENABLED')")
+    @PreAuthorize("hasRole('PATIENT') and hasAuthority('ACCOUNT_ENABLED')")
     public InternalFlowService.PatientResult getResult(
             @AuthenticationPrincipal AuthenticatedUser user,
             @PathVariable UUID caseId) {
@@ -91,7 +91,7 @@ public class PatientCaseController {
     }
 
     @PostMapping("/cases/{caseId}/uploads")
-    @PreAuthorize("hasRole('PACIENTE')")
+    @PreAuthorize("hasRole('PATIENT')")
     public ResponseEntity<UploadIntentResponse> generateUploadUrl(
             @AuthenticationPrincipal AuthenticatedUser user,
             @PathVariable UUID caseId,
@@ -111,7 +111,7 @@ public class PatientCaseController {
     public ResponseEntity<?> completeUpload(
             @AuthenticationPrincipal AuthenticatedUser user,
             @PathVariable UUID fileId) {
-        if (user.role() != com.healthdocs.backend.domain.model.Role.PACIENTE) {
+        if (user.role() != com.healthdocs.backend.domain.model.Role.PATIENT) {
             return ResponseEntity.ok(internalFlow.confirm(user, fileId));
         }
         StoredFile file = confirmFileUpload.execute(new ConfirmFileUploadUseCase.Command(
@@ -119,7 +119,7 @@ public class PatientCaseController {
         return ResponseEntity.ok(new CompleteUploadResponse(FileResponse.from(file), null, CaseStatus.FILES_RECEIVED));
     }
 
-    public record CreateCaseRequest(@NotBlank String studyType) {
+    public record CreateCaseRequest(@NotBlank @jakarta.validation.constraints.Size(max = 200) String studyName) {
     }
 
     public record AcceptConsentRequest(@NotBlank String termsVersion, Instant acceptedAt) {
@@ -135,7 +135,7 @@ public class PatientCaseController {
             UUID id,
             String referenceCode,
             CaseStatus status,
-            String studyType,
+            String studyName,
             Instant createdAt) {
 
         static CaseResponse from(MedicalCase medicalCase) {
@@ -143,7 +143,7 @@ public class PatientCaseController {
                     medicalCase.id(),
                     medicalCase.referenceCode(),
                     medicalCase.status(),
-                    medicalCase.studyType(),
+                    medicalCase.studyName(),
                     medicalCase.createdAt());
         }
     }

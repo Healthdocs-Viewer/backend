@@ -44,13 +44,13 @@ class ListPatientCasesUseCaseTest {
         ListPatientCasesUseCase useCase = new ListPatientCasesUseCase(cases);
 
         assertThrows(ForbiddenOperationException.class,
-                () -> useCase.execute(user(Role.ESTUDIANTE)));
+                () -> useCase.execute(user(Role.RESEARCHER)));
         assertThrows(ForbiddenOperationException.class,
-                () -> useCase.execute(user(Role.PROFESOR)));
+                () -> useCase.execute(user(Role.COORDINATOR)));
     }
 
     private static AuthenticatedUser patient(UUID id) {
-        return new AuthenticatedUser(id, "patient@healthdocs.local", Role.PACIENTE, true);
+        return new AuthenticatedUser(id, "patient@healthdocs.local", Role.PATIENT, true);
     }
 
     private static AuthenticatedUser user(Role role) {

@@ -58,8 +58,8 @@ class OperationsControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        patient = users.save(new AppUserEntity("patient-" + UUID.randomUUID(), "patient-" + UUID.randomUUID() + "@healthdocs.test", Role.PACIENTE));
-        professor = users.save(new AppUserEntity("prof-" + UUID.randomUUID(), "prof-" + UUID.randomUUID() + "@healthdocs.test", Role.PROFESOR));
+        patient = users.save(new AppUserEntity("patient-" + UUID.randomUUID(), "patient-" + UUID.randomUUID() + "@healthdocs.test", Role.PATIENT));
+        professor = users.save(new AppUserEntity("prof-" + UUID.randomUUID(), "prof-" + UUID.randomUUID() + "@healthdocs.test", Role.COORDINATOR));
     }
 
     @Test
@@ -71,25 +71,25 @@ class OperationsControllerIntegrationTest {
     @Test
     void rejectsNonProfessorRolesFromPendingCasesList() throws Exception {
         mockMvc.perform(get("/api/v1/operations/cases/pending")
-                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.ESTUDIANTE, true))))
+                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.RESEARCHER, true))))
                 .andExpect(status().isForbidden());
 
         mockMvc.perform(get("/api/v1/operations/cases/pending")
-                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.PACIENTE, true))))
+                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.PATIENT, true))))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void rejectsDisabledProfessorFromPendingCasesList() throws Exception {
         mockMvc.perform(get("/api/v1/operations/cases/pending")
-                        .with(authentication(authenticatedUser(professor.getId(), Role.PROFESOR, false))))
+                        .with(authentication(authenticatedUser(professor.getId(), Role.COORDINATOR, false))))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void returnsEmptyListWhenNoCasesMeetCriteria() throws Exception {
         mockMvc.perform(get("/api/v1/operations/cases/pending")
-                        .with(authentication(authenticatedUser(professor.getId(), Role.PROFESOR, true))))
+                        .with(authentication(authenticatedUser(professor.getId(), Role.COORDINATOR, true))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
     }
@@ -98,7 +98,7 @@ class OperationsControllerIntegrationTest {
     void listsPendingCasesWithInputFilesAndExcludesIneligibleCases() throws Exception {
         // Case 1: FILES_RECEIVED with INPUT file -> Should be returned
         MedicalCaseEntity eligibleCase = cases.save(new MedicalCaseEntity(
-                UUID.randomUUID(), patient, CaseStatus.FILES_RECEIVED, "CAS-ELIGIBLE-001", "RADIOGRAFIA_TORAX"));
+                UUID.randomUUID(), patient, CaseStatus.FILES_RECEIVED, "CAS-ELIGIBLE-001", "Radiografía de tórax"));
         StoredFileEntity inputFile = files.save(new StoredFileEntity(
                 UUID.randomUUID(), eligibleCase, "input/key/rx.dcm", FileKind.INPUT, "rx.dcm", "application/dicom", 1024L));
 
@@ -126,12 +126,12 @@ class OperationsControllerIntegrationTest {
         results.save(new CaseResultEntity(caseWithResult, resultFile, ResultStatus.UPLOADED));
 
         mockMvc.perform(get("/api/v1/operations/cases/pending")
-                        .with(authentication(authenticatedUser(professor.getId(), Role.PROFESOR, true))))
+                        .with(authentication(authenticatedUser(professor.getId(), Role.COORDINATOR, true))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].id").value(eligibleCase.getId().toString()))
                 .andExpect(jsonPath("$[0].referenceCode").value("CAS-ELIGIBLE-001"))
-                .andExpect(jsonPath("$[0].studyType").value("RADIOGRAFIA_TORAX"))
+                .andExpect(jsonPath("$[0].studyName").value("Radiografía de tórax"))
                 .andExpect(jsonPath("$[0].status").value("FILES_RECEIVED"))
                 .andExpect(jsonPath("$[0].createdAt").exists())
                 .andExpect(jsonPath("$[0].files", hasSize(1)))

@@ -14,7 +14,7 @@ class MedicalCaseDomainTest {
     @Test
     void allowsContractStatusTransitions() {
         MedicalCase medicalCase = MedicalCase.create(
-                UUID.randomUUID(), UUID.randomUUID(), "CAS-20260915-0001", "RADIOGRAFIA_TORAX", Instant.EPOCH);
+                UUID.randomUUID(), UUID.randomUUID(), "CAS-20260915-0001", "Radiografía de tórax", Instant.EPOCH);
 
         medicalCase.transitionTo(CaseStatus.FILES_RECEIVED, Instant.EPOCH.plusSeconds(1));
 
@@ -24,7 +24,7 @@ class MedicalCaseDomainTest {
     @Test
     void rejectsInvalidStatusTransition() {
         MedicalCase medicalCase = MedicalCase.create(
-                UUID.randomUUID(), UUID.randomUUID(), "CAS-20260915-0001", "RADIOGRAFIA_TORAX", Instant.EPOCH);
+                UUID.randomUUID(), UUID.randomUUID(), "CAS-20260915-0001", "Radiografía de tórax", Instant.EPOCH);
 
         assertThrows(
                 IllegalStateException.class,

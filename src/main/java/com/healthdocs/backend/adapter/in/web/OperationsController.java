@@ -38,35 +38,35 @@ public class OperationsController {
     }
 
     @GetMapping("/cases/pending")
-    @PreAuthorize("hasRole('PROFESOR') and hasAuthority('ACCOUNT_ENABLED')")
+    @PreAuthorize("hasRole('COORDINATOR') and hasAuthority('ACCOUNT_ENABLED')")
     public List<ListPendingCasesUseCase.PendingCaseView> listPendingCases(
-            @AuthenticationPrincipal AuthenticatedUser professor) {
-        return listPendingCases.execute(professor);
+            @AuthenticationPrincipal AuthenticatedUser coordinator) {
+        return listPendingCases.execute(coordinator);
     }
 
     @GetMapping("/users/internal")
-    @PreAuthorize("hasRole('PROFESOR') and hasAuthority('ACCOUNT_ENABLED')")
+    @PreAuthorize("hasRole('COORDINATOR') and hasAuthority('ACCOUNT_ENABLED')")
     public List<ListInternalUsersUseCase.InternalUser> listInternalUsers(
-            @AuthenticationPrincipal AuthenticatedUser professor) {
-        return listInternalUsers.execute(professor);
+            @AuthenticationPrincipal AuthenticatedUser coordinator) {
+        return listInternalUsers.execute(coordinator);
     }
 
     @PostMapping("/cases/{caseId}/assignments")
-    @PreAuthorize("hasRole('PROFESOR')")
+    @PreAuthorize("hasRole('COORDINATOR')")
     public ResponseEntity<Void> assignCase(
-            @AuthenticationPrincipal AuthenticatedUser professor,
+            @AuthenticationPrincipal AuthenticatedUser coordinator,
             @PathVariable UUID caseId,
             @Valid @RequestBody AssignRequest request) {
-        assignCase.execute(professor, caseId, request.userId());
+        assignCase.execute(coordinator, caseId, request.userId());
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/results/{resultId}/availability")
-    @PreAuthorize("hasRole('PROFESOR') and hasAuthority('ACCOUNT_ENABLED')")
+    @PreAuthorize("hasRole('COORDINATOR') and hasAuthority('ACCOUNT_ENABLED')")
     public ResponseEntity<Void> makeResultAvailable(
-            @AuthenticationPrincipal AuthenticatedUser professor,
+            @AuthenticationPrincipal AuthenticatedUser coordinator,
             @PathVariable UUID resultId) {
-        internalFlow.makeResultAvailable(professor, resultId);
+        internalFlow.makeResultAvailable(coordinator, resultId);
         return ResponseEntity.noContent().build();
     }
 

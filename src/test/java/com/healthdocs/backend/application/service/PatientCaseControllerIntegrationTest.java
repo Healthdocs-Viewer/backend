@@ -86,10 +86,10 @@ class PatientCaseControllerIntegrationTest {
     @Test
     void rejectsInternalRolesFromCaseList() throws Exception {
         mockMvc.perform(get("/api/v1/cases")
-                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.ESTUDIANTE))))
+                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.RESEARCHER))))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/cases")
-                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.PROFESOR))))
+                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.COORDINATOR))))
                 .andExpect(status().isForbidden());
     }
 
@@ -101,7 +101,7 @@ class PatientCaseControllerIntegrationTest {
                 caseId,
                 patientId,
                 "CAS-20260915-0001",
-                "RADIOGRAFIA_TORAX",
+                "Radiografía de tórax",
                 CaseStatus.CREATED,
                 NOW,
                 NOW));
@@ -109,12 +109,12 @@ class PatientCaseControllerIntegrationTest {
         mockMvc.perform(post("/api/v1/cases")
                         .with(authentication(patientAuth(patientId)))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"studyType\":\"RADIOGRAFIA_TORAX\"}"))
+                        .content("{\"studyName\":\"Radiografía de tórax\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(caseId.toString()))
                 .andExpect(jsonPath("$.referenceCode").value("CAS-20260915-0001"))
                 .andExpect(jsonPath("$.status").value("CREATED"))
-                .andExpect(jsonPath("$.studyType").value("RADIOGRAFIA_TORAX"));
+                .andExpect(jsonPath("$.studyName").value("Radiografía de tórax"));
     }
 
     @Test
@@ -198,9 +198,9 @@ class PatientCaseControllerIntegrationTest {
     @Test
     void rejectsNonPatientRoleByPreAuthorize() throws Exception {
         mockMvc.perform(post("/api/v1/cases")
-                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.ESTUDIANTE)))
+                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.RESEARCHER)))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"studyType\":\"RADIOGRAFIA_TORAX\"}"))
+                        .content("{\"studyName\":\"Radiografía de tórax\"}"))
                 .andExpect(status().isForbidden());
     }
 
@@ -255,7 +255,7 @@ class PatientCaseControllerIntegrationTest {
     }
 
     private static UsernamePasswordAuthenticationToken patientAuth(UUID patientId) {
-        return authenticatedUser(patientId, Role.PACIENTE);
+        return authenticatedUser(patientId, Role.PATIENT);
     }
 
     private static UsernamePasswordAuthenticationToken authenticatedUser(UUID userId, Role role) {

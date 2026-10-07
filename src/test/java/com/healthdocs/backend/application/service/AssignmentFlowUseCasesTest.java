@@ -59,7 +59,7 @@ class AssignmentFlowUseCasesTest {
     void nonProfessorCannotListPendingCases() {
         assertThrows(ForbiddenOperationException.class,
                 () -> new ListPendingCasesUseCase(cases, files).execute(
-                        new AuthenticatedUser(UUID.randomUUID(), "student@test", Role.ESTUDIANTE, true)));
+                        new AuthenticatedUser(UUID.randomUUID(), "student@test", Role.RESEARCHER, true)));
         verify(cases, never()).findPendingCases(any());
     }
 
@@ -73,7 +73,7 @@ class AssignmentFlowUseCasesTest {
         when(files.countByMedicalCaseIdAndFileKind(caseId, FileKind.INPUT)).thenReturn(1L);
         when(users.findById(studentId)).thenReturn(java.util.Optional.of(student));
         when(student.isEnabled()).thenReturn(true);
-        when(student.getRole()).thenReturn(Role.ESTUDIANTE);
+        when(student.getRole()).thenReturn(Role.RESEARCHER);
 
         new AssignCaseUseCase(cases, files, assignments, users, clock).execute(professor(), caseId, studentId);
 
@@ -92,7 +92,7 @@ class AssignmentFlowUseCasesTest {
         when(files.countByMedicalCaseIdAndFileKind(caseId, FileKind.INPUT)).thenReturn(1L);
         when(users.findById(studentId)).thenReturn(java.util.Optional.of(student));
         when(student.isEnabled()).thenReturn(true);
-        when(student.getRole()).thenReturn(Role.ESTUDIANTE);
+        when(student.getRole()).thenReturn(Role.RESEARCHER);
 
         var useCase = new AssignCaseUseCase(cases, files, assignments, users, clock);
         useCase.execute(professor(), caseId, studentId);
@@ -113,8 +113,8 @@ class AssignmentFlowUseCasesTest {
         var flow = new InternalFlowService(cases, files, assignments, results,
                 org.mockito.Mockito.mock(StoragePort.class), org.mockito.Mockito.mock(InternalFlowProperties.class), clock);
 
-        assertEquals(1, flow.list(new AuthenticatedUser(assignedId, "student@test", Role.ESTUDIANTE, true)).size());
-        assertEquals(0, flow.list(new AuthenticatedUser(otherId, "other@test", Role.ESTUDIANTE, true)).size());
+        assertEquals(1, flow.list(new AuthenticatedUser(assignedId, "student@test", Role.RESEARCHER, true)).size());
+        assertEquals(0, flow.list(new AuthenticatedUser(otherId, "other@test", Role.RESEARCHER, true)).size());
         verify(cases).findEnabledForUser(assignedId, CaseStatus.ENABLED_FOR_PROCESSING);
         verify(cases).findEnabledForUser(otherId, CaseStatus.ENABLED_FOR_PROCESSING);
     }
@@ -133,7 +133,7 @@ class AssignmentFlowUseCasesTest {
         when(properties.downloadTtlMinutes()).thenReturn(10);
 
         var flow = new InternalFlowService(cases, files, assignments, results, storage, properties, clock);
-        for (Role role : List.of(Role.ESTUDIANTE, Role.PROFESOR)) {
+        for (Role role : List.of(Role.RESEARCHER, Role.COORDINATOR)) {
             var user = new AuthenticatedUser(userId, role.name().toLowerCase() + "@test", role, true);
             for (CaseStatus status : List.of(CaseStatus.RESULT_UPLOADED, CaseStatus.RESULT_AVAILABLE)) {
                 MedicalCaseEntity medicalCase = caseEntity(caseId, status);
@@ -167,7 +167,7 @@ class AssignmentFlowUseCasesTest {
                 org.mockito.Mockito.mock(StoragePort.class), org.mockito.Mockito.mock(InternalFlowProperties.class),
                 clock, events::add);
 
-        flow.makeResultAvailable(new AuthenticatedUser(professorId, "professor@test", Role.PROFESOR, true), resultId);
+        flow.makeResultAvailable(new AuthenticatedUser(professorId, "professor@test", Role.COORDINATOR, true), resultId);
 
         assertEquals(ResultStatus.AVAILABLE, result.getStatus());
         assertEquals(CaseStatus.RESULT_AVAILABLE, medicalCase.getStatus());
@@ -182,7 +182,7 @@ class AssignmentFlowUseCasesTest {
         assertEquals(patientId, events.get(0).patientId());
 
         assertThrows(BusinessRuleViolationException.class, () -> flow.makeResultAvailable(
-                new AuthenticatedUser(professorId, "professor@test", Role.PROFESOR, true), resultId));
+                new AuthenticatedUser(professorId, "professor@test", Role.COORDINATOR, true), resultId));
         assertEquals(1, events.size());
     }
 
@@ -199,7 +199,7 @@ class AssignmentFlowUseCasesTest {
                 org.mockito.Mockito.mock(StoragePort.class), org.mockito.Mockito.mock(InternalFlowProperties.class), clock);
 
         assertThrows(ForbiddenOperationException.class, () -> flow.makeResultAvailable(
-                new AuthenticatedUser(UUID.randomUUID(), "student@test", Role.ESTUDIANTE, true), resultId));
+                new AuthenticatedUser(UUID.randomUUID(), "student@test", Role.RESEARCHER, true), resultId));
         assertEquals(ResultStatus.UPLOADED, result.getStatus());
         assertEquals(CaseStatus.RESULT_UPLOADED, medicalCase.getStatus());
         verify(results, never()).save(any());
@@ -224,7 +224,7 @@ class AssignmentFlowUseCasesTest {
         when(properties.downloadTtlMinutes()).thenReturn(7);
         InternalFlowService service = new InternalFlowService(cases, files, assignments, results, storage, properties, clock);
 
-        var response = service.patientResult(new AuthenticatedUser(patientId, "patient@test", Role.PACIENTE, true), caseId);
+        var response = service.patientResult(new AuthenticatedUser(patientId, "patient@test", Role.PATIENT, true), caseId);
 
         assertEquals("https://temporary.test/token", response.download().downloadUrl());
         assertEquals(clock.instant().plusSeconds(420), response.download().expiresAt());
@@ -242,7 +242,7 @@ class AssignmentFlowUseCasesTest {
         InternalFlowService service = new InternalFlowService(cases, files, assignments, results, storage, properties, clock);
 
         assertThrows(BusinessRuleViolationException.class, () -> service.patientResult(
-                new AuthenticatedUser(patientId, "patient@test", Role.PACIENTE, true), caseId));
+                new AuthenticatedUser(patientId, "patient@test", Role.PATIENT, true), caseId));
         verify(storage, never()).generateDownloadUrl(any(), any(), any(Integer.class));
     }
 
@@ -261,7 +261,7 @@ class AssignmentFlowUseCasesTest {
         InternalFlowService service = new InternalFlowService(cases, files, assignments, results, storage, properties, clock);
 
         assertThrows(ResourceNotFoundException.class, () -> service.patientResult(
-                new AuthenticatedUser(patientId, "patient@test", Role.PACIENTE, true), caseId));
+                new AuthenticatedUser(patientId, "patient@test", Role.PATIENT, true), caseId));
     }
 
     private AppUserEntity patientEntity(UUID id) {
@@ -277,7 +277,7 @@ class AssignmentFlowUseCasesTest {
     }
 
     private AuthenticatedUser professor() {
-        return new AuthenticatedUser(UUID.randomUUID(), "professor@test", Role.PROFESOR, true);
+        return new AuthenticatedUser(UUID.randomUUID(), "professor@test", Role.COORDINATOR, true);
     }
 
     private MedicalCaseEntity caseEntity(UUID id, CaseStatus status) {

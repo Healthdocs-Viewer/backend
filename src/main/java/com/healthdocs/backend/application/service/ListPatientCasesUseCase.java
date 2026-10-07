@@ -19,15 +19,15 @@ public class ListPatientCasesUseCase {
     }
 
     public List<CaseView> execute(AuthenticatedUser user) {
-        if (user.role() != Role.PACIENTE || !user.enabled()) {
+        if (user.role() != Role.PATIENT || !user.enabled()) {
             throw new ForbiddenOperationException("Only enabled patients can list patient cases");
         }
         return cases.findAllByPatientId(user.id()).stream().map(CaseView::from).toList();
     }
 
-    public record CaseView(UUID id, String referenceCode, String studyType, com.healthdocs.backend.domain.model.CaseStatus status, Instant createdAt) {
+    public record CaseView(UUID id, String referenceCode, String studyName, com.healthdocs.backend.domain.model.CaseStatus status, Instant createdAt) {
         static CaseView from(MedicalCase medicalCase) {
-            return new CaseView(medicalCase.id(), medicalCase.referenceCode(), medicalCase.studyType(), medicalCase.status(), medicalCase.createdAt());
+            return new CaseView(medicalCase.id(), medicalCase.referenceCode(), medicalCase.studyName(), medicalCase.status(), medicalCase.createdAt());
         }
     }
 }

@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/v1")
-@PreAuthorize("hasAnyRole('ESTUDIANTE','PROFESOR')")
+@PreAuthorize("hasAnyRole('RESEARCHER','COORDINATOR')")
 public class InternalCaseController {
     private final InternalFlowService flow;
     public InternalCaseController(InternalFlowService flow){this.flow=flow;}

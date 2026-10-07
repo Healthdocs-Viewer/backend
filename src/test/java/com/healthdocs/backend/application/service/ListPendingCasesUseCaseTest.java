@@ -37,9 +37,9 @@ class ListPendingCasesUseCaseTest {
     @Test
     void listsPendingCasesForEnabledProfessor() {
         UUID caseId = UUID.randomUUID();
-        AppUserEntity patient = new AppUserEntity("pat", "pat@test.local", Role.PACIENTE);
+        AppUserEntity patient = new AppUserEntity("pat", "pat@test.local", Role.PATIENT);
         MedicalCaseEntity caseEntity = new MedicalCaseEntity(
-                caseId, patient, CaseStatus.FILES_RECEIVED, "CAS-20260917-0001", "RADIOGRAFIA_TORAX");
+                caseId, patient, CaseStatus.FILES_RECEIVED, "CAS-20260917-0001", "Radiografía de tórax");
 
         UUID fileId = UUID.randomUUID();
         StoredFileEntity inputFile = new StoredFileEntity(
@@ -55,7 +55,7 @@ class ListPendingCasesUseCaseTest {
         ListPendingCasesUseCase.PendingCaseView view = result.get(0);
         assertEquals(caseId, view.id());
         assertEquals("CAS-20260917-0001", view.referenceCode());
-        assertEquals("RADIOGRAFIA_TORAX", view.studyType());
+        assertEquals("Radiografía de tórax", view.studyName());
         assertEquals(CaseStatus.FILES_RECEIVED, view.status());
         assertEquals(1, view.files().size());
         assertEquals(fileId, view.files().get(0).id());
@@ -69,9 +69,9 @@ class ListPendingCasesUseCaseTest {
     @Test
     void filtersOutNonInputFilesFromCaseView() {
         UUID caseId = UUID.randomUUID();
-        AppUserEntity patient = new AppUserEntity("pat", "pat@test.local", Role.PACIENTE);
+        AppUserEntity patient = new AppUserEntity("pat", "pat@test.local", Role.PATIENT);
         MedicalCaseEntity caseEntity = new MedicalCaseEntity(
-                caseId, patient, CaseStatus.FILES_RECEIVED, "CAS-20260917-0001", "RADIOGRAFIA_TORAX");
+                caseId, patient, CaseStatus.FILES_RECEIVED, "CAS-20260917-0001", "Radiografía de tórax");
 
         UUID inputFileId = UUID.randomUUID();
         StoredFileEntity inputFile = new StoredFileEntity(
@@ -116,12 +116,12 @@ class ListPendingCasesUseCaseTest {
     @Test
     void rejectsStudentAndPatient() {
         ListPendingCasesUseCase useCase = new ListPendingCasesUseCase(cases, files);
-        assertThrows(ForbiddenOperationException.class, () -> useCase.execute(user(Role.ESTUDIANTE, true)));
-        assertThrows(ForbiddenOperationException.class, () -> useCase.execute(user(Role.PACIENTE, true)));
+        assertThrows(ForbiddenOperationException.class, () -> useCase.execute(user(Role.RESEARCHER, true)));
+        assertThrows(ForbiddenOperationException.class, () -> useCase.execute(user(Role.PATIENT, true)));
     }
 
     private static AuthenticatedUser professor(boolean enabled) {
-        return new AuthenticatedUser(UUID.randomUUID(), "prof@healthdocs.local", Role.PROFESOR, enabled);
+        return new AuthenticatedUser(UUID.randomUUID(), "prof@healthdocs.local", Role.COORDINATOR, enabled);
     }
 
     private static AuthenticatedUser user(Role role, boolean enabled) {

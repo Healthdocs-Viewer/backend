@@ -28,7 +28,7 @@ public class ResourceAuthorization {
         if (!user.enabled()) {
             return false;
         }
-        if (user.role() == Role.PACIENTE) {
+        if (user.role() == Role.PATIENT) {
             return cases.existsByIdAndPatientId(caseId, user.id());
         }
         return isInternal(user) && assignments.existsByCaseIdAndUserId(caseId, user.id());
@@ -40,14 +40,14 @@ public class ResourceAuthorization {
     }
 
     public boolean canAssignCases(AuthenticatedUser user) {
-        return user.enabled() && user.role() == Role.PROFESOR;
+        return user.enabled() && user.role() == Role.COORDINATOR;
     }
 
     public boolean canPublishResults(AuthenticatedUser user, UUID caseId) {
-        return canAccessCase(user, caseId) && user.role() == Role.PROFESOR;
+        return canAccessCase(user, caseId) && user.role() == Role.COORDINATOR;
     }
 
     private boolean isInternal(AuthenticatedUser user) {
-        return user.role() == Role.ESTUDIANTE || user.role() == Role.PROFESOR;
+        return user.role() == Role.RESEARCHER || user.role() == Role.COORDINATOR;
     }
 }

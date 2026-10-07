@@ -51,11 +51,11 @@ class PatientFlowUseCasesTest {
         UUID patientId = UUID.randomUUID();
 
         MedicalCase medicalCase = createCase.execute(
-                new CreateCaseUseCase.Command(patientId, Role.PACIENTE, true, "RADIOGRAFIA_TORAX"));
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "RADIOGRAFIA_TORAX"));
 
         assertEquals(patientId, medicalCase.patientId());
         assertEquals("CAS-20260915-0001", medicalCase.referenceCode());
-        assertEquals("RADIOGRAFIA_TORAX", medicalCase.studyType());
+        assertEquals("Radiografía de tórax", medicalCase.studyName());
         assertEquals(CaseStatus.CREATED, medicalCase.status());
     }
 
@@ -63,29 +63,29 @@ class PatientFlowUseCasesTest {
     void acceptsTermsOnlyForOwnedCases() {
         UUID ownerId = UUID.randomUUID();
         MedicalCase medicalCase = createCase.execute(
-                new CreateCaseUseCase.Command(ownerId, Role.PACIENTE, true, "RADIOGRAFIA_TORAX"));
+                new CreateCaseUseCase.Command(ownerId, Role.PATIENT, true, "Radiografía de tórax"));
 
         CaseConsent consent = acceptTerms.execute(
-                new AcceptTermsUseCase.Command(ownerId, Role.PACIENTE, true, medicalCase.id(), "1.0"));
+                new AcceptTermsUseCase.Command(ownerId, Role.PATIENT, true, medicalCase.id(), "1.0"));
 
         assertEquals(ownerId, consent.patientId());
         assertThrows(
                 ForbiddenOperationException.class,
                 () -> acceptTerms.execute(new AcceptTermsUseCase.Command(
-                        UUID.randomUUID(), Role.PACIENTE, true, medicalCase.id(), "1.0")));
+                        UUID.randomUUID(), Role.PATIENT, true, medicalCase.id(), "1.0")));
     }
 
     @Test
     void requiresConsentBeforeGeneratingUploadUrl() {
         UUID patientId = UUID.randomUUID();
         MedicalCase medicalCase = createCase.execute(
-                new CreateCaseUseCase.Command(patientId, Role.PACIENTE, true, "RADIOGRAFIA_TORAX"));
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax"));
 
         assertThrows(
                 BusinessRuleViolationException.class,
                 () -> generateUploadUrl.execute(new GenerateUploadUrlUseCase.Command(
                         patientId,
-                        Role.PACIENTE,
+                        Role.PATIENT,
                         true,
                         medicalCase.id(),
                         "radiografia.dcm",
@@ -97,13 +97,13 @@ class PatientFlowUseCasesTest {
     void generatesUploadAndConfirmTransitionsCaseWhenObjectExists() {
         UUID patientId = UUID.randomUUID();
         MedicalCase medicalCase = createCase.execute(
-                new CreateCaseUseCase.Command(patientId, Role.PACIENTE, true, "RADIOGRAFIA_TORAX"));
-        acceptTerms.execute(new AcceptTermsUseCase.Command(patientId, Role.PACIENTE, true, medicalCase.id(), "1.0"));
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax"));
+        acceptTerms.execute(new AcceptTermsUseCase.Command(patientId, Role.PATIENT, true, medicalCase.id(), "1.0"));
 
         GenerateUploadUrlUseCase.Result upload = generateUploadUrl.execute(
                 new GenerateUploadUrlUseCase.Command(
                         patientId,
-                        Role.PACIENTE,
+                        Role.PATIENT,
                         true,
                         medicalCase.id(),
                         "folder/radiografia.dcm",
@@ -112,7 +112,7 @@ class PatientFlowUseCasesTest {
         storage.put(upload.file().objectKey());
 
         StoredFile confirmed = confirmFileUpload.execute(
-                new ConfirmFileUploadUseCase.Command(patientId, Role.PACIENTE, true, upload.file().id()));
+                new ConfirmFileUploadUseCase.Command(patientId, Role.PATIENT, true, upload.file().id()));
 
         assertEquals(upload.file().id(), confirmed.id());
         assertTrue(confirmed.objectKey().endsWith("_radiografia.dcm"));
@@ -123,17 +123,17 @@ class PatientFlowUseCasesTest {
     void patientCannotConfirmAnotherPatientsFile() {
         UUID patientId = UUID.randomUUID();
         MedicalCase medicalCase = createCase.execute(
-                new CreateCaseUseCase.Command(patientId, Role.PACIENTE, true, "RADIOGRAFIA_TORAX"));
-        acceptTerms.execute(new AcceptTermsUseCase.Command(patientId, Role.PACIENTE, true, medicalCase.id(), "1.0"));
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax"));
+        acceptTerms.execute(new AcceptTermsUseCase.Command(patientId, Role.PATIENT, true, medicalCase.id(), "1.0"));
         GenerateUploadUrlUseCase.Result upload = generateUploadUrl.execute(
                 new GenerateUploadUrlUseCase.Command(
-                        patientId, Role.PACIENTE, true, medicalCase.id(), "rx.dcm", "application/dicom", 1024L));
+                        patientId, Role.PATIENT, true, medicalCase.id(), "rx.dcm", "application/dicom", 1024L));
         storage.put(upload.file().objectKey());
 
         assertThrows(
                 ForbiddenOperationException.class,
                 () -> confirmFileUpload.execute(new ConfirmFileUploadUseCase.Command(
-                        UUID.randomUUID(), Role.PACIENTE, true, upload.file().id())));
+                        UUID.randomUUID(), Role.PATIENT, true, upload.file().id())));
     }
 
     private static class InMemoryCases implements CaseRepositoryPort {

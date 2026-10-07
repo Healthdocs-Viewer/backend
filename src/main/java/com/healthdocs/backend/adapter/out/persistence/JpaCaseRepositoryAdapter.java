@@ -52,7 +52,7 @@ public class JpaCaseRepositoryAdapter implements CaseRepositoryPort {
                 patient,
                 medicalCase.status(),
                 medicalCase.referenceCode(),
-                medicalCase.studyType()));
+                medicalCase.studyName()));
         entity.setStatus(medicalCase.status());
         entity.setUpdatedAt(medicalCase.updatedAt());
         if (existing.isPresent()) {
@@ -151,7 +151,7 @@ public class JpaCaseRepositoryAdapter implements CaseRepositoryPort {
                 entity.getId(),
                 entity.getPatient().getId(),
                 entity.getReferenceCode(),
-                entity.getStudyType(),
+                entity.getStudyName(),
                 entity.getStatus(),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt());

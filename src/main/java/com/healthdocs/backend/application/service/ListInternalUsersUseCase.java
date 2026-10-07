@@ -17,10 +17,10 @@ public class ListInternalUsersUseCase {
     }
 
     public List<InternalUser> execute(AuthenticatedUser requester) {
-        if (requester == null || !requester.enabled() || requester.role() != Role.PROFESOR) {
-            throw new ForbiddenOperationException("Only enabled professors can list internal users");
+        if (requester == null || !requester.enabled() || requester.role() != Role.COORDINATOR) {
+            throw new ForbiddenOperationException("Only enabled coordinators can list internal users");
         }
-        return users.findByEnabledTrueAndRoleInOrderByEmailAsc(List.of(Role.ESTUDIANTE, Role.PROFESOR))
+        return users.findByEnabledTrueAndRoleInOrderByEmailAsc(List.of(Role.RESEARCHER, Role.COORDINATOR))
                 .stream()
                 .map(InternalUser::from)
                 .toList();

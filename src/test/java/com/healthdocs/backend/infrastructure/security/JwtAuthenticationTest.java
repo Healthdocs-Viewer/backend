@@ -24,7 +24,7 @@ class JwtAuthenticationTest {
         UUID userId = UUID.randomUUID();
 
         JwtService.JwtIdentity identity = service.parse(service.issue(
-                new AuthenticatedUser(userId, "user@example.com", Role.PACIENTE, true)));
+                new AuthenticatedUser(userId, "user@example.com", Role.PATIENT, true)));
 
         assertEquals(userId, identity.userId());
     }
@@ -33,7 +33,7 @@ class JwtAuthenticationTest {
     void expiredTokenIsRejected() throws InterruptedException {
         JwtService service = new JwtService(SECRET, 0);
         String token = service.issue(
-                new AuthenticatedUser(UUID.randomUUID(), "user@example.com", Role.PACIENTE, true));
+                new AuthenticatedUser(UUID.randomUUID(), "user@example.com", Role.PATIENT, true));
         Thread.sleep(Duration.ofMillis(10));
 
         assertThrows(JwtException.class, () -> service.parse(token));
@@ -50,7 +50,7 @@ class JwtAuthenticationTest {
     void filterDoesNotAuthenticateExpiredToken() throws Exception {
         JwtService service = new JwtService(SECRET, 0);
         AuthenticatedUser expected = new AuthenticatedUser(
-                UUID.randomUUID(), "user@example.com", Role.PACIENTE, true);
+                UUID.randomUUID(), "user@example.com", Role.PATIENT, true);
         AuthProvider provider = new AuthProvider() {
             @Override
             public AuthenticatedUser authenticate(String email, String password) {
@@ -84,7 +84,7 @@ class JwtAuthenticationTest {
     void filterUsesProviderValidationInsteadOfTrustingClaims() {
         JwtService service = new JwtService(SECRET, 3600);
         AuthenticatedUser expected = new AuthenticatedUser(
-                UUID.randomUUID(), "user@example.com", Role.ESTUDIANTE, true);
+                UUID.randomUUID(), "user@example.com", Role.RESEARCHER, true);
         AuthProvider provider = new AuthProvider() {
             @Override
             public AuthenticatedUser authenticate(String email, String password) {
