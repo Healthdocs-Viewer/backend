@@ -40,19 +40,25 @@ El backend sigue arquitectura hexagonal: los adaptadores HTTP dependen de puerto
 
 ## Autenticación local de desarrollo
 
-El proveedor se selecciona con `AUTH_PROVIDER`. El valor por defecto seguro es `disabled`; `AUTH_PROVIDER=local` habilita el proveedor local y sus tres cuentas mediante Flyway:
+El proveedor se selecciona con `AUTH_PROVIDER`. El valor por defecto seguro es `disabled`; `AUTH_PROVIDER=local` habilita el proveedor local y sus tres cuentas mediante Flyway. El correo y contraseña de las cuentas de investigador/coordinador conservan identificadores históricos; sus roles guardados son `researcher` y `coordinator`:
 
 | Rol | Correo | Contraseña |
 |---|---|---|
-| paciente | `paciente@healthdocs.local` | `paciente123` |
-| estudiante | `estudiante@healthdocs.local` | `estudiante123` |
-| profesor | `profesor@healthdocs.local` | `profesor123` |
+| `patient` (Paciente) | `paciente@healthdocs.local` | `paciente123` |
+| `researcher` (Investigador) | `estudiante@healthdocs.local` | `estudiante123` |
+| `coordinator` (Coordinador) | `profesor@healthdocs.local` | `profesor123` |
 
-`POST /api/v1/auth/login` devuelve el JWT local y `GET /api/v1/me` devuelve la identidad, rol y `enabled` de la cuenta autenticada. El secreto debe reemplazarse mediante `JWT_SECRET` fuera del entorno local. En producción se debe usar `AUTH_PROVIDER=disabled` hasta configurar el proveedor real; `AUTH_PROVIDER=local` solo habilita el seed de cuentas de prueba. La interfaz `AuthProvider` y el punto `CognitoAuthProvider` permiten incorporar Cognito sin cambiar controladores ni servicios de aplicación.
+`POST /api/v1/auth/login` devuelve el JWT local y `GET /api/v1/me` devuelve la identidad, rol y `enabled` de la cuenta autenticada. El secreto debe reemplazarse mediante `JWT_SECRET` fuera del entorno local. `AUTH_PROVIDER=local` solo habilita el seed de cuentas de prueba y solo funciona en perfiles `local`/`dev`.
+
+Para validar access tokens de Supabase, configure `AUTH_PROVIDER=supabase`, `AUTH_ISSUER_URL`, `AUTH_JWKS_URL` y `AUTH_AUDIENCE` (por defecto `authenticated`). El backend verifica la firma mediante JWKS, limita los algoritmos a ES256/RS256 y comprueba issuer, audience y expiración. Luego resuelve `(provider=supabase, issuer, subject)` en `auth_identity`; no provisiona ni vincula cuentas automáticamente y toma el rol y `enabled` desde `app_user`. `POST /api/v1/auth/login` responde 410 cuando se selecciona Supabase porque las credenciales deben autenticarse desde el servicio de frontend. La interfaz `AuthProvider` conserva el proveedor local y deja separado el adaptador externo.
+
+Para vincular cuentas existentes de forma aprobada use el importador no web del perfil `auth-migration`, documentado en [`docs/architecture/auth_identity_linking.md`](docs/architecture/auth_identity_linking.md). La simulación es el valor predeterminado; el importador valida access tokens vigentes y registra quién aprobó cada vínculo.
+
+Supabase debe usar una llave de firma asimétrica para publicar las llaves en JWKS. El proveedor local continúa usando `JWT_SECRET` para emitir y validar tokens HMAC de desarrollo; no se debe reutilizar ese secreto para tokens externos.
 
 **Discrepancia reportada:** la versión actual del contrato OpenAPI (`0.2.0`) no declara `enabled` en `UserProfile`; el backend lo expone de forma aditiva para cerrar el requisito de estado de cuenta. El contrato debe incorporar ese campo en la siguiente actualización coordinada.
 
-Las reglas HTTP base son: `paciente` para `/cases`, `estudiante` o `profesor` para `/internal`, y únicamente `profesor` para `/operations`. Los casos de uso que implementen esas rutas deben validar además propiedad del paciente o asignación explícita del usuario interno antes de consultar archivos, resultados o emitir URLs.
+Las reglas HTTP base son: `patient` para `/cases`, `researcher` o `coordinator` para `/internal`, y únicamente `coordinator` para `/operations`. El rol `admin` está disponible para gestión de roles; cualquier otro privilegio administrativo debe definirse de forma explícita. Los casos de uso que implementen esas rutas deben validar además propiedad del paciente o asignación explícita del usuario interno antes de consultar archivos, resultados o emitir URLs.
 
 ## Contrato API
 
@@ -65,7 +71,7 @@ El contrato canónico vive en [`openapi/openapi.yaml`](openapi/openapi.yaml). An
 
 ## Flujo interno
 
-Los usuarios `estudiante` y `profesor` asignados pueden consultar `GET /api/v1/internal/cases`, solicitar la descarga de un `INPUT`, crear una intención en `POST /api/v1/internal/cases/{caseId}/result-uploads` y confirmar en `POST /api/v1/files/{fileId}/complete`. La confirmación valida el objeto, evita duplicados y asocia el resultado junto con la auditoría y el cambio de estado en una transacción.
+Los usuarios `researcher` y `coordinator` asignados pueden consultar `GET /api/v1/internal/cases`, solicitar la descarga de un `INPUT`, crear una intención en `POST /api/v1/internal/cases/{caseId}/result-uploads` y confirmar en `POST /api/v1/files/{fileId}/complete`. La confirmación valida el objeto, evita duplicados y asocia el resultado junto con la auditoría y el cambio de estado en una transacción.
 
 ## Notificaciones SQS de resultados
 

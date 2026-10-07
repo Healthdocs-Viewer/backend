@@ -10,10 +10,10 @@ info:
     No define la autenticación de producción. Las demás rutas requieren Authorization:
     Bearer <token>. El JWT firmado contiene sub (UserProfile.id), role (UserRole) y
     exp (expiración en segundos Unix). La identidad y el rol proceden del token validado.
-    Los roles iniciales paciente, estudiante y profesor sustituyen en 0.2.0 los valores
-    PATIENT, STUDENT, PROFESSOR y ADMIN; no existe un administrador inicial.
+    Los roles actuales son patient, researcher, coordinator y admin. Las cuentas
+    de desarrollo se describen como paciente, investigador y coordinador; no hay un administrador inicial.
 
-    Un paciente solo accede a sus casos. Estudiantes y profesores solo acceden a casos
+    Un paciente solo accede a sus casos. Investigadores y coordinadores solo acceden a casos
     habilitados explícitamente para su usuario; el rol no concede acceso global.
     Las listas aplican los mismos filtros. Se verifica también que cada archivo o
     resultado pertenezca al caso autorizado antes de modificarlo o emitir URLs.
@@ -30,9 +30,9 @@ paths:
     get:
       summary: Lista casos pendientes de habilitación
       description: |
-        Lista casos que un profesor habilitado puede seleccionar para habilitar
+        Lista casos que un coordinador habilitado puede seleccionar para habilitar
         en el flujo interno. Solo expone metadatos operativos mínimos.
-        La autorización se basa en el rol PROFESOR y una cuenta habilitada;
+        La autorización se basa en el rol COORDINATOR y una cuenta habilitada;
         no requiere una asignación previa porque esta operación inicia la asignación.
       operationId: listPendingCases
       responses:
@@ -81,7 +81,7 @@ paths:
     get:
       summary: Obtiene el perfil autenticado
       operationId: getCurrentUser
-      description: Paciente, estudiante o profesor; devuelve la identidad, el rol y el estado de habilitación de la cuenta autenticada.
+      description: Paciente, investigador o coordinador; devuelve la identidad, el rol y el estado de habilitación de la cuenta autenticada.
       responses:
         '200':
           description: Perfil actual
@@ -212,7 +212,7 @@ paths:
       operationId: completeUpload
       description: |
         Para INPUT, requiere paciente propietario del caso. Para RESULT, requiere
-        estudiante o profesor habilitado para el caso. El servidor obtiene el caso
+        investigador o coordinador habilitado para el caso. El servidor obtiene el caso
         y tipo desde fileId y verifica que el usuario haya iniciado la intención de carga.
         Para RESULT, la confirmación crea la asociación case_result, registra actor
         y timestamp, y transiciona el caso a RESULT_UPLOADED de forma transaccional.
@@ -242,7 +242,7 @@ paths:
       summary: Lista los casos internos visibles para el usuario autenticado
       operationId: listAssignedCases
       description: |
-        Solo estudiante o profesor con cuenta habilitada. Lista casos asignados
+        Solo investigador o coordinador con cuenta habilitada. Lista casos asignados
         explícitamente al usuario autenticado que tengan al menos un archivo INPUT
         y estén en ENABLED_FOR_PROCESSING, RESULT_UPLOADED o RESULT_AVAILABLE.
         Cuando existe un resultado, incluye su resumen en la propiedad result.
@@ -264,9 +264,9 @@ paths:
       summary: Crea una intención de descarga para un archivo INPUT visible
       operationId: createInputDownload
       description: |
-        Solo estudiante o profesor con cuenta habilitada. Un usuario interno asignado
+        Solo investigador o coordinador con cuenta habilitada. Un usuario interno asignado
         puede descargar INPUT cuando el caso está ENABLED_FOR_PROCESSING, RESULT_UPLOADED
-        o RESULT_AVAILABLE. Un profesor puede descargar INPUT de un caso FILES_RECEIVED
+        o RESULT_AVAILABLE. Un coordinador puede descargar INPUT de un caso FILES_RECEIVED
         aunque todavía no tenga una asignación previa. fileId debe ser INPUT y pertenecer
         al caso.
       parameters:
@@ -290,7 +290,7 @@ paths:
       summary: Crea una intención de descarga para un resultado
       operationId: createResultDownload
       description: |
-        Solo estudiante o profesor con cuenta habilitada y asignación explícita
+        Solo investigador o coordinador con cuenta habilitada y asignación explícita
         del caso. El resultado debe pertenecer al caso indicado y puede estar
         UPLOADED o AVAILABLE.
       parameters:
@@ -314,7 +314,7 @@ paths:
       summary: Elimina un resultado no publicado y devuelve el caso a procesamiento
       operationId: deleteResult
       description: |
-        Solo estudiante o profesor con cuenta habilitada y asignación explícita
+        Solo investigador o coordinador con cuenta habilitada y asignación explícita
         del caso. Solo puede eliminarse un resultado UPLOADED. La operación elimina
         la asociación y el archivo RESULT, y transiciona el caso a
         ENABLED_FOR_PROCESSING. Un resultado AVAILABLE no puede eliminarse.
@@ -341,7 +341,7 @@ paths:
       summary: Crea una intención de carga de resultado externo
       operationId: createResultUpload
       description: |
-        Solo estudiante o profesor con cuenta habilitada y asignación explícita
+        Solo investigador o coordinador con cuenta habilitada y asignación explícita
         para caseId. La intención incluye `expiresAt`; mientras esté vigente
         no crea `case_result`. Una intención expirada permite solicitar otra.
       parameters:
@@ -386,7 +386,7 @@ paths:
   /operations/users/internal:
     get:
       summary: Lista usuarios internos habilitados
-      description: Solo un profesor con cuenta habilitada puede consultar estudiantes y profesores habilitados.
+      description: Solo un coordinador con cuenta habilitada puede consultar investigadores y coordinadores habilitados.
       operationId: listInternalUsers
       responses:
         '200':
@@ -405,10 +405,10 @@ paths:
     post:
       summary: Habilita un caso y asigna acceso a un usuario interno
       description: |
-        Solo un profesor con cuenta habilitada que ya tenga acceso al caso puede ejecutar
+        Solo un coordinador con cuenta habilitada que ya tenga acceso al caso puede ejecutar
         la operación. La operación crea la asignación del usuario indicado y conserva
-        también la asignación del profesor ejecutor. El destinatario puede ser estudiante
-        o profesor habilitado. La habilitación inicial del profesor se prepara en los datos
+        también la asignación del coordinador ejecutor. El destinatario puede ser investigador
+        o coordinador habilitado. La habilitación inicial del coordinador se prepara en los datos
         de prueba locales.
       operationId: assignCase
       parameters:
@@ -435,7 +435,7 @@ paths:
     post:
       summary: Marca un resultado como disponible
       description: |
-        Publica el resultado asociado a resultId. Solo un profesor con cuenta
+        Publica el resultado asociado a resultId. Solo un coordinador con cuenta
         habilitada y asignación explícita al caso puede ejecutar la operación.
         El servidor resuelve el caso desde resultId y exige la transición atómica
         del resultado de UPLOADED a AVAILABLE y del caso de RESULT_UPLOADED a
@@ -592,7 +592,7 @@ components:
     UserRole:
       type: string
       description: Roles iniciales de desarrollo; valores transmitidos en minúsculas.
-      enum: [paciente, estudiante, profesor]
+      enum: [patient, researcher, coordinator, admin]
     CaseStatus:
       type: string
       enum: [CREATED, FILES_RECEIVED, ENABLED_FOR_PROCESSING, RESULT_UPLOADED, RESULT_AVAILABLE]
@@ -617,15 +617,16 @@ components:
           description: Indica si la cuenta está habilitada para operar.
     CaseSummary:
       type: object
-      required: [id, referenceCode, status, studyType, createdAt]
+      required: [id, referenceCode, status, studyName, createdAt]
       properties:
         id:
           type: string
           format: uuid
         referenceCode:
           type: string
-        studyType:
+        studyName:
           type: string
+          description: Nombre del estudio proporcionado por el paciente.
         status:
           $ref: '#/components/schemas/CaseStatus'
         createdAt:
@@ -647,11 +648,13 @@ components:
     CreateCaseRequest:
       type: object
       additionalProperties: false
-      required: [studyType]
+      required: [studyName]
       properties:
-        studyType:
+        studyName:
           type: string
+          description: Nombre del estudio proporcionado por el paciente.
           minLength: 1
+          maxLength: 200
     FileSummary:
       type: object
       required: [id, originalFilename, sizeBytes, fileKind]

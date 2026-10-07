@@ -28,6 +28,9 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
       AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
+      AUTH_ISSUER_URL: ${AUTH_ISSUER_URL:-}
+      AUTH_JWKS_URL: ${AUTH_JWKS_URL:-}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-authenticated}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB:-healthdocs}
