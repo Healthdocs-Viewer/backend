@@ -29,13 +29,14 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/api/v1/auth/login", "/actuator/health", "/actuator/health/**").permitAll()
+                        .requestMatchers("/api/v1/auth/login", "/api/v1/auth/register", "/actuator/health", "/actuator/health/**").permitAll()
                         // Las URLs locales de storage llevan su propio token temporal.
                         // Se abren en una pestaña nueva, por lo que no reciben el Bearer del frontend.
                         .requestMatchers("/api/v1/dev/uploads/**", "/api/v1/dev/downloads/**").permitAll()
-                        .requestMatchers("/api/v1/cases/**").hasRole("PACIENTE")
-                        .requestMatchers("/api/v1/internal/**").hasAnyRole("ESTUDIANTE", "PROFESOR")
-                        .requestMatchers("/api/v1/operations/**").hasRole("PROFESOR")
+                        .requestMatchers("/api/v1/cases/**").hasRole("PATIENT")
+                        .requestMatchers("/api/v1/internal/**").hasAnyRole("RESEARCHER", "COORDINATOR")
+                        .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/operations/**").hasRole("COORDINATOR")
                         .requestMatchers("/api/v1/files/**", "/api/v1/me").hasAuthority("ACCOUNT_ENABLED")
                         .anyRequest().hasAuthority("ACCOUNT_ENABLED"))
                 .exceptionHandling(exceptions -> exceptions

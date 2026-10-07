@@ -7,11 +7,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record AuthConfigurationProperties(
         String provider,
         Jwt jwt,
-        Cognito cognito) {
+        Cognito cognito,
+        ExternalJwt externalJwt) {
 
     public record Jwt(String secret, String issuer, Duration expiration) {
     }
 
     public record Cognito(String region, String userPoolId, String clientId) {
+    }
+
+    public record ExternalJwt(String issuerUrl, String jwksUrl, String audience) {
     }
 }

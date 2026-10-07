@@ -67,6 +67,13 @@ public class AppUserEntity {
         return role;
     }
 
+    public void changeRole(Role role) {
+        if (role == null) {
+            throw new IllegalArgumentException("Role is required");
+        }
+        this.role = role;
+    }
+
     public String getPasswordHash() {
         return passwordHash;
     }

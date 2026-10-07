@@ -1,7 +1,9 @@
 package com.healthdocs.backend.adapter.out.auth;
 
 import com.healthdocs.backend.adapter.out.persistence.AppUserRepository;
+import com.healthdocs.backend.adapter.out.persistence.AuthIdentityRepository;
 import com.healthdocs.backend.adapter.out.persistence.entity.AppUserEntity;
+import com.healthdocs.backend.adapter.out.persistence.entity.AuthIdentityEntity;
 import com.healthdocs.backend.application.port.out.AuthProvider;
 import com.healthdocs.backend.application.port.out.InvalidAuthenticationTokenException;
 import com.healthdocs.backend.domain.model.Role;
@@ -18,14 +20,17 @@ import io.jsonwebtoken.JwtException;
 public class LocalAuthProvider implements AuthProvider {
 
     private final AppUserRepository users;
+    private final AuthIdentityRepository identities;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
 
     public LocalAuthProvider(
             AppUserRepository users,
+            AuthIdentityRepository identities,
             PasswordEncoder passwordEncoder,
             JwtService jwtService) {
         this.users = users;
+        this.identities = identities;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
     }
@@ -41,6 +46,7 @@ public class LocalAuthProvider implements AuthProvider {
             throw new DisabledAccountException();
         }
 
+        ensureLocalIdentity(user);
         Role role = user.getRole();
         return new AuthenticatedUser(user.getId(), user.getEmail(), role, true);
     }
@@ -54,8 +60,14 @@ public class LocalAuthProvider implements AuthProvider {
             throw new InvalidAuthenticationTokenException();
         }
 
-        AppUserEntity user = users.findById(identity.userId())
-                .orElseThrow(InvalidAuthenticationTokenException::new);
+        AppUserEntity user;
+        if (identity.issuer() == null) {
+            user = users.findById(identity.userId())
+                    .orElseThrow(InvalidAuthenticationTokenException::new);
+        } else {
+            user = users.findByAuthIdentity("local", identity.issuer(), identity.subject())
+                    .orElseThrow(InvalidAuthenticationTokenException::new);
+        }
         if (!user.isEnabled()) {
             return new AuthenticatedUser(user.getId(), user.getEmail(), user.getRole(), false);
         }
@@ -64,7 +76,20 @@ public class LocalAuthProvider implements AuthProvider {
 
     @Override
     public String issueToken(AuthenticatedUser user) {
-        return jwtService.issue(user);
+        AppUserEntity account = users.findById(user.id())
+                .orElseThrow(InvalidAuthenticationTokenException::new);
+        ensureLocalIdentity(account);
+        return jwtService.issue(user, account.getExternalSubject());
+    }
+
+    private void ensureLocalIdentity(AppUserEntity user) {
+        identities.findByProviderAndIssuerAndSubject("local", jwtService.issuer(), user.getExternalSubject())
+                .ifPresentOrElse(existing -> {
+                    if (!existing.getUser().getId().equals(user.getId())) {
+                        throw new IllegalStateException("Local authentication identity is linked to another user");
+                    }
+                }, () -> identities.save(new AuthIdentityEntity(
+                        user, "local", jwtService.issuer(), user.getExternalSubject())));
     }
 
     public static class DisabledAccountException extends RuntimeException {

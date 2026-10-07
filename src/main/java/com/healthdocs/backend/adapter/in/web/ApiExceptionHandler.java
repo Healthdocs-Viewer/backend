@@ -1,6 +1,7 @@
 package com.healthdocs.backend.adapter.in.web;
 
 import com.healthdocs.backend.adapter.out.auth.LocalAuthProvider.DisabledAccountException;
+import com.healthdocs.backend.application.port.out.InvalidAuthenticationTokenException;
 import com.healthdocs.backend.application.service.BusinessRuleViolationException;
 import com.healthdocs.backend.application.service.PayloadTooLargeException;
 import com.healthdocs.backend.application.service.UnsupportedMediaTypeException;
@@ -56,6 +57,12 @@ public class ApiExceptionHandler {
     public ResponseEntity<ErrorResponse> handleConflict(BusinessRuleViolationException exception) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorResponse("CONFLICT", exception.getMessage(), UUID.randomUUID().toString()));
+    }
+
+    @ExceptionHandler(InvalidAuthenticationTokenException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidAuthenticationToken() {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(new ErrorResponse("UNAUTHORIZED", "Invalid authentication token", UUID.randomUUID().toString()));
     }
 
     @ExceptionHandler(PayloadTooLargeException.class)

@@ -29,6 +29,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        // Registration verifies the bearer token before a business account exists,
+        // so the normal filter cannot resolve it through AuthProvider yet.
+        return "/api/v1/auth/register".equals(request.getServletPath());
+    }
+
+    @Override
     protected void doFilterInternal(
             HttpServletRequest request,
             HttpServletResponse response,

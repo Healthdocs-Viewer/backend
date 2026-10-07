@@ -12,6 +12,8 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration,classpath:db/migration-${AUTH_PROVIDER:disabled}
+    placeholders:
+      auth-issuer: ${auth.jwt.issuer:healthdocs-default}
     fail-on-missing-locations: false
     validate-on-migrate: true
     clean-disabled: true
@@ -53,6 +55,10 @@ auth:
     region: ${COGNITO_REGION:us-east-1}
     user-pool-id: ${COGNITO_USER_POOL_ID:pool-id}
     client-id: ${COGNITO_CLIENT_ID:client-id}
+  external-jwt:
+    issuer-url: ${AUTH_ISSUER_URL:}
+    jwks-url: ${AUTH_JWKS_URL:}
+    audience: ${AUTH_AUDIENCE:authenticated}
 
 management:
   endpoints:

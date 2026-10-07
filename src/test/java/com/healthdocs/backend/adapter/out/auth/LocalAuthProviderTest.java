@@ -1,6 +1,7 @@
 package com.healthdocs.backend.adapter.out.auth;
 
 import com.healthdocs.backend.adapter.out.persistence.AppUserRepository;
+import com.healthdocs.backend.adapter.out.persistence.AuthIdentityRepository;
 import com.healthdocs.backend.adapter.out.persistence.entity.AppUserEntity;
 import com.healthdocs.backend.domain.model.Role;
 import com.healthdocs.backend.infrastructure.security.JwtService;
@@ -19,27 +20,30 @@ import static org.mockito.Mockito.when;
 class LocalAuthProviderTest {
 
     private AppUserRepository repository;
+    private AuthIdentityRepository identities;
     private LocalAuthProvider provider;
 
     @BeforeEach
     void setUp() {
         repository = mock(AppUserRepository.class);
+        identities = mock(AuthIdentityRepository.class);
         provider = new LocalAuthProvider(
                 repository,
+                identities,
                 new BCryptPasswordEncoder(),
                 new JwtService("01234567890123456789012345678901", 3600));
     }
 
     @Test
     void acceptsDocumentedCredentialsForAllUsers() {
-        assertCredentials("paciente@healthdocs.local", "paciente123", Role.PACIENTE);
-        assertCredentials("estudiante@healthdocs.local", "estudiante123", Role.ESTUDIANTE);
-        assertCredentials("profesor@healthdocs.local", "profesor123", Role.PROFESOR);
+        assertCredentials("paciente@healthdocs.local", "paciente123", Role.PATIENT);
+        assertCredentials("estudiante@healthdocs.local", "estudiante123", Role.RESEARCHER);
+        assertCredentials("profesor@healthdocs.local", "profesor123", Role.COORDINATOR);
     }
 
     @Test
     void rejectsIncorrectPassword() {
-        AppUserEntity user = user(Role.PACIENTE, "paciente123", true);
+        AppUserEntity user = user(Role.PATIENT, "paciente123", true);
         when(repository.findByEmailIgnoreCase("paciente@healthdocs.local")).thenReturn(Optional.of(user));
 
         assertThrows(BadCredentialsException.class,
@@ -48,7 +52,7 @@ class LocalAuthProviderTest {
 
     @Test
     void returnsForbiddenMarkerForDisabledAccountAfterCorrectPassword() {
-        AppUserEntity user = user(Role.PACIENTE, "paciente123", false);
+        AppUserEntity user = user(Role.PATIENT, "paciente123", false);
         when(repository.findByEmailIgnoreCase("paciente@healthdocs.local")).thenReturn(Optional.of(user));
 
         assertThrows(LocalAuthProvider.DisabledAccountException.class,

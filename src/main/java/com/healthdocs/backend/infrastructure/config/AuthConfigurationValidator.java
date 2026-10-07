@@ -1,6 +1,7 @@
 package com.healthdocs.backend.infrastructure.config;
 
 import java.util.Locale;
+import java.net.URI;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
@@ -26,9 +27,10 @@ public class AuthConfigurationValidator implements InitializingBean {
         switch (provider) {
             case "local" -> validateLocal();
             case "cognito" -> validateCognito();
+            case "supabase" -> validateSupabase();
             case "disabled" -> {}
             default -> throw new IllegalStateException(
-                    "AUTH_PROVIDER debe ser 'local', 'cognito' o 'disabled'; se recibió: " + properties.provider());
+                    "AUTH_PROVIDER debe ser 'local', 'cognito', 'supabase' o 'disabled'; se recibió: " + properties.provider());
         }
     }
 
@@ -59,6 +61,30 @@ public class AuthConfigurationValidator implements InitializingBean {
         required(cognito.region(), "COGNITO_REGION");
         required(cognito.userPoolId(), "COGNITO_USER_POOL_ID");
         required(cognito.clientId(), "COGNITO_CLIENT_ID");
+    }
+
+    private void validateSupabase() {
+        AuthConfigurationProperties.ExternalJwt external = properties.externalJwt();
+        if (external == null) {
+            throw new IllegalStateException(
+                    "AUTH_ISSUER_URL, AUTH_JWKS_URL y AUTH_AUDIENCE son obligatorios para AUTH_PROVIDER=supabase");
+        }
+        validateHttpsUrl(external.issuerUrl(), "AUTH_ISSUER_URL");
+        validateHttpsUrl(external.jwksUrl(), "AUTH_JWKS_URL");
+        required(external.audience(), "AUTH_AUDIENCE");
+    }
+
+    private static void validateHttpsUrl(String value, String name) {
+        String configured = required(value, name);
+        try {
+            URI uri = URI.create(configured);
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
+                    || uri.getUserInfo() != null || uri.getFragment() != null) {
+                throw new IllegalStateException(name + " debe ser una URL HTTPS válida");
+            }
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException(name + " debe ser una URL HTTPS válida", exception);
+        }
     }
 
     private static String required(String value, String name) {
