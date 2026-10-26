@@ -53,3 +53,11 @@ La versión del contrato vive en `info.version`. Mientras esté en `0.x`, un cam
 ## Contrato de la primera entrega
 
 La primera entrega cubre autenticación de desarrollo, creación de caso, intención y confirmación de carga, lista interna de casos habilitados, descarga, carga de resultado, disponibilidad y consulta del resultado. Las operaciones bajo `/operations` son temporales para demostración; no definen todavía el rol administrativo final.
+
+## Intenciones de carga INPUT
+
+Para `POST /cases/{caseId}/uploads`, el backend guarda en `stored_file.upload_expires_at` el vencimiento devuelto por el proveedor de almacenamiento. La creación bloquea la fila del caso y busca una intención INPUT sin confirmar cuyo vencimiento siga vigente; si existe, responde `409` sin crear otra asociación. El bloqueo serializa solicitudes concurrentes para el mismo caso.
+
+Para `POST /cases`, el cliente envía un UUID `Idempotency-Key` nuevo por cada creación lógica y conserva esa misma clave al reintentar. La clave se asocia al usuario autenticado y a un hash del contenido normalizado. Un reintento idéntico devuelve el mismo caso con `200` y `Idempotency-Replayed: true`; la primera creación devuelve `201` y `false`. Reutilizar la clave con contenido distinto devuelve `409`. Una clave nueva permite crear otro caso aunque tenga el mismo nombre, fecha e institución. El backend serializa creaciones del mismo usuario con bloqueo de fila y asigna `referenceCode` mediante contador transaccional para evitar colisiones bajo concurrencia. Los casos existentes no se deduplican ni se fusionan.
+
+Una intención expirada o confirmada deja de bloquear nuevas cargas, por lo que se pueden adjuntar varios archivos uno después de otro. `POST /files/{fileId}/complete` rechaza con `409` una intención sin confirmar que ya expiró, y los reintentos de una carga confirmada siguen siendo idempotentes. La migración V20 marca como expiradas las intenciones antiguas no confirmadas usando el TTL histórico de 15 minutos; no cambia archivos ya confirmados.

@@ -22,6 +22,23 @@ El storage local queda en el volumen `backend-storage` y no se publica como un d
 
 Para detener la base de datos, ejecuta `docker compose down`. Para eliminar también los datos locales, ejecuta `docker compose down -v`.
 
+## Pruebas
+
+Las pruebas de integración que activan el perfil `test` usan Testcontainers para iniciar PostgreSQL 16 y ejecutar todas las migraciones Flyway sobre PostgreSQL. Para ejecutarlas, Docker Desktop debe estar iniciado y el motor Docker debe ser accesible desde la terminal:
+
+```powershell
+docker version
+mvn test
+```
+
+Para ejecutar solo las pruebas de arranque y persistencia JPA:
+
+```powershell
+mvn "-Dtest=TestProfileStartupTest,JpaCaseRepositoryAdapterIntegrationTest" test
+```
+
+La primera ejecución puede tardar mientras Docker descarga las imágenes de PostgreSQL y Testcontainers y Spring inicia el contexto. Si `docker version` no puede conectar con el motor, Maven puede iniciar, pero las pruebas de integración fallarán al crear la base de datos. En Codex, el acceso al motor Docker depende de los permisos del entorno de ejecución y no se configura en este repositorio.
+
 ## Estructura inicial
 
 ```text

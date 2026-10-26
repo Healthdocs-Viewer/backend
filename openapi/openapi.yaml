@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Healthdocs Viewer API
-  version: 0.3.0
+  version: 0.9.0
   description: |
     Contrato inicial del MVP. Es la fuente única de verdad entre frontend y backend.
     Los archivos se transfieren directamente con URLs prefirmadas; la API no recibe el contenido binario.
@@ -11,12 +11,17 @@ info:
     Bearer <token>. El JWT firmado contiene sub (UserProfile.id), role (UserRole) y
     exp (expiración en segundos Unix). La identidad y el rol proceden del token validado.
     Los roles actuales son patient, researcher, coordinator y admin. Las cuentas
-    de desarrollo se describen como paciente, investigador y coordinador; no hay un administrador inicial.
+    de desarrollo disponibles dependen de la configuración local.
 
-    Un paciente solo accede a sus casos. Investigadores y coordinadores solo acceden a casos
-    habilitados explícitamente para su usuario; el rol no concede acceso global.
-    Las listas aplican los mismos filtros. Se verifica también que cada archivo o
-    resultado pertenezca al caso autorizado antes de modificarlo o emitir URLs.
+    El espacio personal de casos, consentimiento, archivos de entrada y resultados
+    está disponible para los cuatro roles y siempre se limita a los recursos cuyo
+    propietario es el usuario autenticado. Los casos asignados a investigadores y
+    coordinadores pertenecen a sus espacios operativos y requieren autorización
+    explícita; ser de un rol interno no concede acceso global.
+    Cada dashboard es específico de su rol. En esta versión solo está definido
+    GET /patient/dashboard para PATIENT; los dashboards de los otros roles quedan
+    pendientes de diseño y contrato. Cada archivo o resultado se valida contra
+    el caso y el alcance autorizados antes de modificarlo o emitir URLs.
     401 indica credenciales incorrectas o token ausente, inválido o expirado.
     403 indica identidad autenticada sin rol, propiedad o habilitación requerida.
     Los errores no revelan propietarios, asignaciones ni datos de otros usuarios.
@@ -31,9 +36,14 @@ paths:
       summary: Lista casos pendientes de habilitación
       description: |
         Lista casos que un coordinador habilitado puede seleccionar para habilitar
-        en el flujo interno. Solo expone metadatos operativos mínimos.
+        en el flujo interno. Solo incluye casos en FILES_RECEIVED y expone
+        metadatos operativos mínimos.
         La autorización se basa en el rol COORDINATOR y una cuenta habilitada;
         no requiere una asignación previa porque esta operación inicia la asignación.
+        La cola de coordinación puede incluir casos cuyo propietario sea el propio
+        coordinador: la propiedad personal no excluye el caso de la gestión operativa.
+        Los casos con una solicitud de cambio en borrador o revisión no se listan
+        aquí ni pueden asignarse hasta que la solicitud se cancele o decida.
       operationId: listPendingCases
       responses:
         '200':
@@ -81,7 +91,7 @@ paths:
     get:
       summary: Obtiene el perfil autenticado
       operationId: getCurrentUser
-      description: Paciente, investigador o coordinador; devuelve la identidad, el rol y el estado de habilitación de la cuenta autenticada.
+      description: Disponible para cualquier cuenta autenticada y habilitada (PATIENT, RESEARCHER, COORDINATOR o ADMIN). Devuelve únicamente la identidad, el rol y el estado de habilitación de esa cuenta; no concede acceso a recursos clínicos.
       responses:
         '200':
           description: Perfil actual
@@ -95,9 +105,25 @@ paths:
           $ref: '#/components/responses/Forbidden'
   /cases:
     post:
-      summary: Crea un caso para el paciente autenticado
+      summary: Crea un caso propio para el usuario autenticado
       operationId: createCase
-      description: Solo paciente. El servidor establece al usuario autenticado como propietario.
+      description: |
+        Disponible para cualquier cuenta habilitada (PATIENT, RESEARCHER, COORDINATOR
+        o ADMIN). El servidor establece al usuario autenticado como propietario.
+        Esta operación se ejecuta al continuar desde la etapa Información y requiere
+        todos los datos obligatorios del estudio. El caso se crea directamente con
+        estado CONSENT_PENDING; no se persiste un borrador INFORMATION_PENDING.
+        El cliente debe enviar Idempotency-Key como UUID nuevo por cada intento
+        lógico de creación y reutilizarlo en reintentos técnicos. La clave se limita
+        al usuario autenticado. Repetir clave y mismo contenido devuelve el caso
+        original; repetirla con contenido distinto devuelve 409. Una clave nueva
+        crea un caso nuevo incluso si los datos coinciden.
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          description: UUID estable del intento lógico; reutilizar solo para reintentos.
+          schema: { type: string, format: uuid }
       requestBody:
         required: true
         content:
@@ -106,41 +132,109 @@ paths:
               $ref: '#/components/schemas/CreateCaseRequest'
       responses:
         '201':
-          description: Caso creado
+          description: Caso creado con estado CONSENT_PENDING
+          headers:
+            Idempotency-Replayed:
+              description: '`false` para creación nueva.'
+              schema: { type: boolean }
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CaseSummary'
+                $ref: '#/components/schemas/CaseDetails'
+        '200':
+          description: Reintento idempotente; devuelve el caso existente
+          headers:
+            Idempotency-Replayed:
+              description: '`true` cuando se devuelve el resultado de una solicitud anterior.'
+              schema: { type: boolean }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseDetails'
+        '400':
+          $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Idempotency-Key ya utilizada con un contenido diferente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
     get:
-      summary: Lista los casos del paciente autenticado
+      summary: Lista los casos visibles para el usuario autenticado
       operationId: listMyCases
-      description: Solo paciente; devuelve únicamente casos propiedad del usuario autenticado.
+      description: >-
+        Disponible para cualquier cuenta habilitada (PATIENT, RESEARCHER, COORDINATOR
+        o ADMIN). Devuelve únicamente casos cuyo propietario es el usuario autenticado,
+        independientemente del rol.
+        Los casos asignados a investigadores o visibles para coordinación se
+        consultan desde los endpoints de sus espacios operativos. El servidor obtiene la identidad del token y no acepta un
+        patientId/userId del cliente. Los filtros, contadores y paginación se
+        calculan sobre el conjunto visible para ese rol. Los estados CONSENT_PENDING,
+        FILE_PENDING, CONFIRMATION_PENDING, FILES_RECEIVED, INPUT_CHANGE_DRAFT y
+        INPUT_CHANGE_REVIEW representan pasos previos
+        a la asignación; `RESULT_AVAILABLE` es el estado final del flujo actual.
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string, default: '' }
+        - in: query
+          name: status
+          description: PENDING incluye CONSENT_PENDING, FILE_PENDING, CONFIRMATION_PENDING, FILES_RECEIVED, INPUT_CHANGE_DRAFT e INPUT_CHANGE_REVIEW; IN_PROGRESS incluye ENABLED_FOR_PROCESSING y RESULT_UPLOADED; RESULT_AVAILABLE incluye casos con resultado disponible.
+          schema: { type: string, enum: [ALL, PENDING, IN_PROGRESS, RESULT_AVAILABLE], default: ALL }
+        - in: query
+          name: sort
+          schema: { type: string, enum: [createdAt:asc, createdAt:desc, updatedAt:asc, updatedAt:desc, referenceCode:asc, referenceCode:desc], default: createdAt:desc }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
       responses:
         '200':
-          description: Casos del paciente
+          description: Casos propios del usuario autenticado
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/CaseSummary'
+                $ref: '#/components/schemas/PatientCasesPage'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /cases/{caseId}:
+    get:
+      summary: Obtiene el detalle de un caso propio
+      operationId: getCaseDetails
+      description: >-
+        Cualquier rol habilitado puede consultar sus propios casos. Investigadores
+        y coordinadores también pueden consultar casos asignados que estén habilitados
+        y tengan archivos de entrada. Devuelve metadatos de presentación; no se usan
+        en reglas operativas. ADMIN solo consulta casos propios.
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: Detalle del caso
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseDetails' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /cases/{caseId}/consent:
     post:
       summary: Registra la aceptación del consentimiento informado
       operationId: acceptConsent
       description: |
-        Solo paciente propietario de caseId. Persiste el consentimiento con un
-        timestamp de aceptación y la versión de los términos aceptados.
-        Si el paciente ya aceptó esta versión de los términos para este caso,
-        devuelve 409. El caso debe existir y pertenecer al paciente autenticado.
+        Cualquier usuario habilitado propietario de caseId (PATIENT, RESEARCHER,
+        COORDINATOR o ADMIN). Solo se permite cuando el estado es CONSENT_PENDING.
+        Persiste el consentimiento con un timestamp de aceptación y la versión de
+        los términos aceptados. Al registrarlo, cambia el estado del caso a FILE_PENDING.
+        Si el usuario ya aceptó esta versión de los términos para este caso,
+        devuelve 409. El caso debe existir y pertenecer al usuario autenticado.
         Este paso es obligatorio antes de solicitar la URL de carga de archivos.
       parameters:
         - $ref: '#/components/parameters/CaseId'
@@ -172,13 +266,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /cases/{caseId}/uploads:
+    get:
+      summary: Lista los archivos INPUT vigentes del caso propio
+      description: >-
+        Solo el propietario habilitado. Devuelve el conjunto vigente y excluye
+        propuestas de cambio y archivos históricos reemplazados. Durante una
+        solicitud de cambio los archivos originales siguen vigentes hasta la
+        aprobación de coordinación.
+      operationId: listMyCaseInputFiles
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+      responses:
+        '200':
+          description: Archivos INPUT vigentes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FileSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
     post:
       summary: Crea una intención de carga de archivo de entrada
       operationId: createInputUpload
       description: |
-        Solo paciente propietario de caseId. La intención incluye `expiresAt`.
+        Cualquier usuario habilitado propietario de caseId (PATIENT, RESEARCHER,
+        COORDINATOR o ADMIN). La intención incluye `expiresAt`.
         Mientras una intención esté vigente, no se crea una asociación de caso
-        adicional; cuando expire, el paciente puede solicitar una nueva intención.
+        adicional; cuando expire, el propietario puede solicitar una nueva intención.
+        Para el flujo inicial, solo se permite cargar archivos INPUT en FILE_PENDING
+        o CONFIRMATION_PENDING. Para cambios posteriores a FILES_RECEIVED, usar
+        POST /cases/{caseId}/input-change-requests/{requestId}/uploads; esas cargas
+        se asocian a una propuesta y no alteran los archivos vigentes.
+        Se permite adjuntar varios archivos; al completar el primer archivo INPUT,
+        el caso pasa a CONFIRMATION_PENDING y el propietario puede continuar agregando
+        archivos antes de confirmar el envío. Cada archivo INPUT es un adjunto
+        independiente, no una versión de los demás. Al confirmar el envío, los
+        archivos quedan congelados para proteger el material que recibirá coordinación
+        e investigación.
       parameters:
         - $ref: '#/components/parameters/CaseId'
       requestBody:
@@ -206,16 +332,252 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /cases/{caseId}/uploads/{fileId}/download:
+    post:
+      summary: Crea una descarga temporal para un archivo INPUT propio
+      description: >-
+        Solo el propietario habilitado puede descargar archivos INPUT confirmados
+        y vigentes que pertenezcan al caso indicado. Durante una solicitud activa,
+        también puede descargar archivos de la propuesta que no hayan sido retirados.
+        Los archivos reemplazados, retirados o pertenecientes a otro caso no se exponen.
+      operationId: createMyCaseInputDownload
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+        - { $ref: '#/components/parameters/FileId' }
+      responses:
+        '200':
+          description: URL temporal de descarga
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DownloadIntent' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /cases/{caseId}/input-change-requests:
+    get:
+      summary: Lista solicitudes de cambio del caso propio
+      description: Devuelve el historial de solicitudes, incluida la activa si existe. Solo está disponible al propietario.
+      operationId: listMyInputChangeRequests
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+      responses:
+        '200':
+          description: Historial de solicitudes de cambio
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/InputChangeRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      summary: Inicia un borrador de solicitud de cambio
+      description: >-
+        Solo el propietario habilitado cuando el caso está FILES_RECEIVED o
+        ENABLED_FOR_PROCESSING, siempre que no exista resultado cargado ni publicado.
+        Crea un único borrador activo, copia como propuesta inicial el conjunto INPUT
+        vigente y cambia el caso a INPUT_CHANGE_DRAFT. El motivo breve se completa o
+        actualiza durante la edición. Los archivos y la asignación vigentes no cambian.
+        Si el caso estaba asignado, el investigador conserva acceso de solo lectura a
+        los archivos originales; se pausa la carga de resultados hasta que se decida
+        la solicitud. La transición se serializa con asignación y carga de RESULT.
+      operationId: createInputChangeRequest
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+      responses:
+        '201':
+          description: Borrador creado; el caso pasa a INPUT_CHANGE_DRAFT y conserva el estado previo en resumeCaseStatus
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InputChangeRequest' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /cases/{caseId}/input-change-requests/{requestId}:
+    get:
+      summary: Consulta una solicitud propia
+      description: Devuelve estado, motivo, conjunto vigente y propuesta. Solo el propietario del caso.
+      operationId: getMyInputChangeRequest
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+        - { $ref: '#/components/parameters/InputChangeRequestId' }
+      responses:
+        '200':
+          description: Solicitud de cambio
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InputChangeRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Actualiza el motivo breve del borrador
+      description: Solo el propietario mientras la solicitud está en DRAFT. El motivo es obligatorio para enviarla y admite hasta 250 caracteres.
+      operationId: updateInputChangeRequestReason
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+        - { $ref: '#/components/parameters/InputChangeRequestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 250 }
+      responses:
+        '200':
+          description: Motivo actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InputChangeRequest' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /cases/{caseId}/input-change-requests/{requestId}/uploads:
+    post:
+      summary: Crea intención de carga para un INPUT propuesto
+      description: Solo el propietario en DRAFT. La carga queda asociada a la propuesta, no al conjunto vigente.
+      operationId: createInputChangeUpload
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+        - { $ref: '#/components/parameters/InputChangeRequestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUploadIntentRequest' }
+      responses:
+        '201':
+          description: URL temporal creada para el archivo propuesto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadIntent' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /cases/{caseId}/input-change-requests/{requestId}/files/{fileId}:
+    delete:
+      summary: Retira un archivo del conjunto propuesto
+      description: >-
+        Solo el propietario en DRAFT. Retira fileId de proposedFiles; no modifica
+        ni elimina un archivo vigente. Puede retirar archivos originales o archivos
+        propuestos cuya carga ya se completó. La propuesta debe conservar al menos
+        un INPUT completo al enviarse.
+      operationId: removeInputFromChangeProposal
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+        - { $ref: '#/components/parameters/InputChangeRequestId' }
+        - { $ref: '#/components/parameters/FileId' }
+      responses:
+        '204': { description: Archivo retirado de la propuesta }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /cases/{caseId}/input-change-requests/{requestId}/submission:
+    post:
+      summary: Envía la propuesta a coordinación
+      description: >-
+        Solo el propietario. Requiere DRAFT, al menos un INPUT completo y ninguna
+        intención de carga vigente o incompleta. Bloquea la propuesta, cambia la
+        solicitud a PENDING_REVIEW y el caso a INPUT_CHANGE_REVIEW. Desde entonces
+        el propietario no puede editarla ni iniciar otra solicitud. La asignación
+        existente se conserva. Si había investigador asignado, mantiene acceso de
+        solo lectura al conjunto original, pero no puede cargar RESULT hasta que la
+        solicitud se resuelva.
+      operationId: submitInputChangeRequest
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+        - { $ref: '#/components/parameters/InputChangeRequestId' }
+      responses:
+        '204': { description: Solicitud enviada y bloqueada para revisión }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /cases/{caseId}/input-change-requests/{requestId}/cancellation:
+    post:
+      summary: Cancela un borrador de cambio
+      description: >-
+        Solo el propietario y solo en DRAFT. Descarta la propuesta; los archivos
+        cargados exclusivamente para ella dejan de estar disponibles y se programan
+        para limpieza del storage. Los archivos vigentes, la asignación existente y
+        los metadatos de auditoría se conservan; el caso vuelve al estado guardado en
+        resumeCaseStatus.
+      operationId: cancelInputChangeRequest
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+        - { $ref: '#/components/parameters/InputChangeRequestId' }
+      responses:
+        '204': { description: Borrador cancelado }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /cases/{caseId}/uploads/{fileId}:
+    delete:
+      summary: Elimina lógicamente un archivo INPUT antes de enviar el caso
+      operationId: deleteInputUpload
+      description: |
+        Solo cualquier usuario habilitado propietario del caso. El archivo debe
+        ser INPUT, pertenecer al caso y estar completo. Solo se permite mientras
+        el caso está en CONFIRMATION_PENDING; después de FILES_RECEIVED el material
+        enviado queda congelado. La baja conserva el registro y la auditoría, pero
+        el archivo deja de aparecer en la lista vigente y no se puede descargar.
+        Si era el último archivo INPUT, el caso vuelve a FILE_PENDING; de lo
+        contrario permanece en CONFIRMATION_PENDING. Para sustituir un archivo,
+        el propietario carga el nuevo y luego elimina el anterior. Debe quedar al
+        menos un archivo INPUT vigente para enviar el caso.
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/FileId'
+        - name: reason
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4000
+      responses:
+        '204':
+          description: Archivo INPUT dado de baja lógicamente
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El archivo no es INPUT/completo, el caso ya fue enviado o su eliminación dejaría inválida una operación concurrente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /files/{fileId}/complete:
     post:
       summary: Confirma que el navegador terminó una carga directa
       operationId: completeUpload
       description: |
-        Para INPUT, requiere paciente propietario del caso. Para RESULT, requiere
-        investigador o coordinador habilitado para el caso. El servidor obtiene el caso
+        Para INPUT, requiere cualquier usuario habilitado propietario del caso.
+        Para RESULT, requiere un investigador habilitado, con authorizationStatus
+        AUTHORIZED y asignado al caso.
+        El servidor obtiene el caso
         y tipo desde fileId y verifica que el usuario haya iniciado la intención de carga.
         Para RESULT, la confirmación crea la asociación case_result, registra actor
         y timestamp, y transiciona el caso a RESULT_UPLOADED de forma transaccional.
+        Para INPUT del flujo inicial, registra el archivo; cuando es el primero del
+        caso, cambia FILE_PENDING a CONFIRMATION_PENDING. Si ya está CONFIRMATION_PENDING,
+        permite completar archivos adicionales sin cambiar el estado. Para archivos
+        de una solicitud de cambio, asocia el archivo a la propuesta identificada por
+        la intención y mantiene el caso en INPUT_CHANGE_DRAFT; nunca reemplaza el
+        conjunto vigente al completar la carga.
       parameters:
         - $ref: '#/components/parameters/FileId'
       responses:
@@ -232,19 +594,50 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: La intención de carga expiró o la confirmación ya fue procesada
+          description: La intención de carga expiró, ya fue procesada o el caso no permite completar ese tipo de archivo en su estado actual
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /cases/{caseId}/submission:
+    post:
+      summary: Confirma y envía el caso a coordinación
+      operationId: submitCase
+      description: |
+        Cualquier usuario habilitado propietario de caseId (PATIENT, RESEARCHER,
+        COORDINATOR o ADMIN). Solo se permite desde CONFIRMATION_PENDING, después
+        de aceptar el consentimiento y completar al menos un archivo INPUT.
+        Registra receivedAt y cambia el estado a FILES_RECEIVED de forma atómica.
+        La respuesta exitosa confirma el envío; la interfaz avanza solo entonces.
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '204':
+          description: Caso enviado; su estado ahora es FILES_RECEIVED
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El caso no está en CONFIRMATION_PENDING, falta consentimiento o no tiene archivos INPUT completos
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /internal/cases:
     get:
-      summary: Lista los casos internos visibles para el usuario autenticado
+      summary: Lista los casos asignados al investigador autenticado
       operationId: listAssignedCases
       description: |
-        Solo investigador o coordinador con cuenta habilitada. Lista casos asignados
+        Solo investigador con cuenta habilitada. Lista casos asignados
         explícitamente al usuario autenticado que tengan al menos un archivo INPUT
-        y estén en ENABLED_FOR_PROCESSING, RESULT_UPLOADED o RESULT_AVAILABLE.
+        y estén en FILES_RECEIVED, ENABLED_FOR_PROCESSING, INPUT_CHANGE_DRAFT, INPUT_CHANGE_REVIEW,
+        RESULT_UPLOADED o RESULT_AVAILABLE. Cada elemento incluye createdAt y updatedAt;
+        updatedAt es el instante de la última modificación del caso. En los estados INPUT_CHANGE_* devuelve
+        solo los INPUT originales vigentes; el investigador no ve archivos propuestos.
+        Mientras la solicitud esté abierta, se bloquea la creación de cargas RESULT.
         Cuando existe un resultado, incluye su resumen en la propiedad result.
       responses:
         '200':
@@ -259,16 +652,43 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /internal/cases/{caseId}:
+    get:
+      summary: Consulta el detalle de un caso asignado al investigador
+      operationId: getAssignedCaseDetail
+      description: |
+        Solo investigadores con cuenta habilitada. El caso debe estar asignado
+        explícitamente al usuario autenticado. Devuelve metadatos, archivos INPUT
+        vigentes y resultados visibles. No expone la lista de otros investigadores
+        ni permite gestionar asignaciones, revisar solicitudes de cambio o publicar
+        resultados.
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: Detalle del caso asignado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResearcherAcademicCaseDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /internal/cases/{caseId}/files/{fileId}/download:
     post:
       summary: Crea una intención de descarga para un archivo INPUT visible
       operationId: createInputDownload
       description: |
         Solo investigador o coordinador con cuenta habilitada. Un usuario interno asignado
-        puede descargar INPUT cuando el caso está ENABLED_FOR_PROCESSING, RESULT_UPLOADED
-        o RESULT_AVAILABLE. Un coordinador puede descargar INPUT de un caso FILES_RECEIVED
-        aunque todavía no tenga una asignación previa. fileId debe ser INPUT y pertenecer
-        al caso.
+        puede descargar INPUT cuando el caso está ENABLED_FOR_PROCESSING, INPUT_CHANGE_DRAFT,
+        INPUT_CHANGE_REVIEW, RESULT_UPLOADED o RESULT_AVAILABLE. En INPUT_CHANGE_* solo
+        puede descargar los INPUT originales vigentes, en modo de consulta; las propuestas
+        no son visibles para el investigador. Un coordinador puede descargar INPUT de un
+        caso FILES_RECEIVED aunque todavía no tenga asignación previa. fileId debe ser INPUT,
+        pertenecer al caso y ser vigente en el alcance del actor.
       parameters:
         - $ref: '#/components/parameters/CaseId'
         - $ref: '#/components/parameters/FileId'
@@ -285,6 +705,42 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /internal/results:
+    get:
+      summary: Lista resultados internos visibles para el investigador asignado
+      operationId: listResearcherResults
+      description: Incluye únicamente resultados vigentes y cargas activas pendientes de publicación; omite las bajas y el historial anterior. El nombre se obtiene de stored_file.original_filename. El resumen y la paginación se calculan sobre el mismo conjunto filtrado.
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ResultStatus' } }
+        - { name: sort, in: query, schema: { type: string, default: 'uploadedAt,desc' } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+      responses:
+        '200':
+          description: Resultados internos y agregados de las filas filtradas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResearcherResultsPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /internal/cases/{caseId}/results/history:
+    get:
+      summary: Consulta historial completo de versiones del caso asignado
+      operationId: listResultHistory
+      description: Acceso solo para investigador o coordinador habilitado y asignado. Incluye versiones previas y bajas lógicas.
+      parameters:
+        - { $ref: '#/components/parameters/CaseId' }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+      responses:
+        '200':
+          description: Historial paginado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResultHistoryPage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /internal/cases/{caseId}/results/{resultId}/download:
     post:
       summary: Crea una intención de descarga para un resultado
@@ -311,19 +767,34 @@ paths:
           $ref: '#/components/responses/NotFound'
   /internal/cases/{caseId}/results/{resultId}:
     delete:
-      summary: Elimina un resultado no publicado y devuelve el caso a procesamiento
+      summary: Elimina una carga pendiente o un resultado que requiere corrección
       operationId: deleteResult
       description: |
-        Solo investigador o coordinador con cuenta habilitada y asignación explícita
-        del caso. Solo puede eliminarse un resultado UPLOADED. La operación elimina
-        la asociación y el archivo RESULT, y transiciona el caso a
-        ENABLED_FOR_PROCESSING. Un resultado AVAILABLE no puede eliminarse.
+        Solo el investigador habilitado asignado al caso puede eliminar la versión
+        UPLOADED pendiente de revisión o la versión CORRECTION_REQUIRED vigente.
+        Registra deletedAt, deletedBy
+        y deletionReason, conserva el archivo como historial y lo excluye de las
+        listas habituales y descargas. El caso vuelve a ENABLED_FOR_PROCESSING para
+        permitir otra carga. Para reemplazar un resultado UPLOADED o corregir uno
+        CORRECTION_REQUIRED, el investigador primero debe retirarlo con esta operación y luego iniciar una nueva carga;
+        no existe reemplazo directo dentro de la intención de carga. Una versión
+        AVAILABLE no se elimina directamente con esta operación:
+        coordinación debe solicitar corrección mediante
+        /operations/results/{resultId}/correction-requests, lo que retira su acceso
+        al propietario y exige una nueva versión que coordinación publicará.
       parameters:
         - $ref: '#/components/parameters/CaseId'
         - $ref: '#/components/parameters/ResultId'
+        - name: reason
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4000
       responses:
         '204':
-          description: Resultado eliminado y caso devuelto a procesamiento
+          description: Resultado marcado como eliminado y conservado con su archivo
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -331,7 +802,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: El resultado ya fue publicado y no puede eliminarse
+          description: La transición no es válida para el estado actual
           content:
             application/json:
               schema:
@@ -341,9 +812,26 @@ paths:
       summary: Crea una intención de carga de resultado externo
       operationId: createResultUpload
       description: |
-        Solo investigador o coordinador con cuenta habilitada y asignación explícita
-        para caseId. La intención incluye `expiresAt`; mientras esté vigente
+        Solo investigador con cuenta habilitada, authorizationStatus AUTHORIZED y
+        asignación explícita para caseId. Permite una carga inicial o corregida en
+        ENABLED_FOR_PROCESSING. Una versión UPLOADED pendiente debe eliminarse
+        primero mediante DELETE /internal/cases/{caseId}/results/{resultId}; al
+        eliminarla, el caso vuelve a ENABLED_FOR_PROCESSING y puede iniciarse otra
+        carga. No hay reemplazo directo de una versión pendiente. No se permite
+        crear ni completar cargas RESULT mientras el caso
+        esté en INPUT_CHANGE_DRAFT o INPUT_CHANGE_REVIEW; el procesamiento se pausa
+        hasta que la solicitud vuelva al estado guardado. Cada intención corresponde
+        a un único archivo y no crea un paquete con varios archivos. El investigador puede
+        descargar los recursos del caso y cargar el resultado; no se exige registrar
+        ni validar una descarga previa. La intención
+        incluye `expiresAt`; mientras esté vigente
         no crea `case_result`. Una intención expirada permite solicitar otra.
+        Cuando la versión vigente está CORRECTION_REQUIRED, completar la nueva
+        carga crea la siguiente versión con estado UPLOADED y deja atendida la
+        solicitud anterior; la nueva versión requiere publicación de coordinación.
+        Cada versión representa un único archivo. Las versiones se numeran de forma
+        secuencial por caso y nunca se reutiliza un número, incluso si una versión
+        pendiente se elimina antes de cargar otra.
       parameters:
         - $ref: '#/components/parameters/CaseId'
       requestBody:
@@ -366,7 +854,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: El caso no está habilitado, ya tiene resultado, existe una intención vigente o la confirmación llegó después de expirar
+          description: El caso no está habilitado para una carga inicial/corregida, existe una intención vigente o la confirmación llegó después de expirar
           content:
             application/json:
               schema:
@@ -383,6 +871,111 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /operations/input-change-requests:
+    get:
+      summary: Lista solicitudes de cambio pendientes de revisión
+      description: >-
+        Solo coordinación habilitada. Devuelve solicitudes PENDING_REVIEW de otros
+        propietarios; un coordinador no revisa su propia solicitud. Incluye casos
+        asignados o no asignados, siempre que aún no tengan resultado. Las solicitudes
+        pendientes no aparecen en la cola de asignación hasta que se decidan.
+      operationId: listPendingInputChangeRequests
+      responses:
+        '200':
+          description: Solicitudes pendientes de decisión
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/InputChangeRequestSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /operations/input-change-requests/{requestId}:
+    get:
+      summary: Consulta una solicitud para revisión
+      description: Solo coordinación habilitada distinta del propietario. Devuelve motivo, archivos vigentes y propuesta completa; no requiere asignación previa.
+      operationId: getInputChangeRequestForReview
+      parameters:
+        - { $ref: '#/components/parameters/InputChangeRequestId' }
+      responses:
+        '200':
+          description: Solicitud con conjuntos vigente y propuesto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InputChangeRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /operations/input-change-requests/{requestId}/approval:
+    post:
+      summary: Aprueba una solicitud de cambio
+      description: >-
+        Solo coordinación habilitada distinta del propietario del caso. Requiere PENDING_REVIEW. En una transacción
+        activa exactamente proposedFiles y desactiva los archivos INPUT originales
+        que se retiraron de la propuesta. Sus objetos se eliminan del almacenamiento;
+        se conserva la auditoría de la solicitud, pero los archivos reemplazados no
+        quedan disponibles en listas, historial descargable ni operaciones. Registra
+        actor y fecha, marca la solicitud APPROVED y devuelve el caso al estado
+        guardado en resumeCaseStatus (FILES_RECEIVED o ENABLED_FOR_PROCESSING).
+      operationId: approveInputChangeRequest
+      parameters:
+        - { $ref: '#/components/parameters/InputChangeRequestId' }
+      responses:
+        '204': { description: Aprobada; nuevo conjunto INPUT activado }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /operations/input-change-requests/{requestId}/files/{fileId}/download:
+    post:
+      summary: Crea una descarga temporal para revisar un archivo de la solicitud
+      description: >-
+        Solo coordinación habilitada distinta del propietario y mientras la solicitud
+        está PENDING_REVIEW. fileId debe pertenecer a originalFiles o proposedFiles.
+        No requiere asignación y no permite acceder a archivos fuera de esa solicitud.
+      operationId: createInputChangeReviewDownload
+      parameters:
+        - { $ref: '#/components/parameters/InputChangeRequestId' }
+        - { $ref: '#/components/parameters/FileId' }
+      responses:
+        '200':
+          description: URL temporal para revisar el archivo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DownloadIntent' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /operations/input-change-requests/{requestId}/rejection:
+    post:
+      summary: Rechaza una solicitud de cambio
+      description: >-
+        Solo coordinación habilitada distinta del propietario. Conserva el conjunto
+        vigente, registra la decisión y devuelve el caso al estado guardado en
+        resumeCaseStatus (FILES_RECEIVED o ENABLED_FOR_PROCESSING). Los
+        archivos nuevos de la propuesta rechazada dejan de estar disponibles y se
+        programan para limpieza del storage; los metadatos de auditoría se conservan.
+      operationId: rejectInputChangeRequest
+      parameters:
+        - { $ref: '#/components/parameters/InputChangeRequestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        '204': { description: Rechazada; archivos originales permanecen vigentes }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /operations/users/internal:
     get:
       summary: Lista usuarios internos habilitados
@@ -401,15 +994,130 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /admin/users/{userId}/role:
+    put:
+      summary: Cambia el rol de una cuenta
+      description: Solo coordinadores o administradores habilitados. Al cambiar a researcher, guarda AUTHORIZED junto al rol en la misma transacción. Repetir researcher conserva authorizationStatus, incluso si está RESTRICTED.
+      operationId: changeUserRole
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  $ref: '#/components/schemas/UserRole'
+      responses:
+        '200':
+          description: Rol y perfil persistidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRoleResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /operations/researchers:
+    get:
+      summary: Lista y filtra el directorio de investigadores
+      description: Incluye cuentas con rol researcher. q busca por nombre, código o correo; con status AUTHORIZED solo devuelve cuentas habilitadas que pueden recibir asignaciones. Los conteos se derivan de las asignaciones.
+      operationId: listResearchers
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/AuthorizationStatus' } }
+        - { name: sort, in: query, schema: { type: string, default: name,asc } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        '200':
+          description: Directorio paginado y resumen global
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResearcherDirectory'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /operations/researchers/{userId}/authorization:
+    put:
+      summary: Restringe o restablece autorización del investigador
+      description: Cambia solo authorizationStatus; conserva cuenta, asignaciones e historial.
+      operationId: changeResearcherAuthorization
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [authorizationStatus]
+              properties:
+                authorizationStatus:
+                  $ref: '#/components/schemas/AuthorizationStatus'
+      responses:
+        '200':
+          description: Estado de autorización actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Researcher'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /operations/researchers/{userId}/profile:
+    put:
+      summary: Completa o actualiza el perfil del investigador
+      operationId: updateResearcherProfile
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fullName, researcherCode]
+              properties:
+                fullName: { type: string, minLength: 1, maxLength: 200 }
+                researcherCode: { type: string, minLength: 1, maxLength: 50 }
+      responses:
+        '200':
+          description: Perfil del investigador actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Researcher'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /operations/cases/{caseId}/assignments:
     post:
-      summary: Habilita un caso y asigna acceso a un usuario interno
+      summary: Asigna un caso recibido a un investigador
       description: |
-        Solo un coordinador con cuenta habilitada que ya tenga acceso al caso puede ejecutar
-        la operación. La operación crea la asignación del usuario indicado y conserva
-        también la asignación del coordinador ejecutor. El destinatario puede ser investigador
-        o coordinador habilitado. La habilitación inicial del coordinador se prepara en los datos
-        de prueba locales.
+        Solo un coordinador con cuenta habilitada puede ejecutar la operación sobre
+        un caso disponible en su cola operativa. La operación no crea una asignación
+        al coordinador ejecutor: no puede indicar su propio userId como destinatario.
+        El coordinador puede asignar a un investigador un caso propio si aparece en
+        su cola operativa y cumple los requisitos de asignación. Solo se permite
+        asignar casos en FILES_RECEIVED; una asignación exitosa cambia el caso a
+        ENABLED_FOR_PROCESSING.
+        Se rechaza la asignación cuando el caso está en INPUT_CHANGE_DRAFT o
+        INPUT_CHANGE_REVIEW; cualquier asignación existente se conserva mientras
+        se resuelve la solicitud.
+        Asigna al usuario indicado y conserva sin cambios el acceso operativo que ya
+        tenga el coordinador ejecutor. El destinatario debe ser un investigador
+        habilitado distinto del coordinador ejecutor; no se permiten como destinatarios
+        coordinadores ni administradores en esta versión. Un investigador solo puede
+        recibir una nueva asignación si su
+        authorizationStatus es AUTHORIZED. RESTRICTED impide asignaciones nuevas, pero no
+        elimina sus asignaciones vigentes ni el historial asociado. authorizationStatus es
+        independiente de app_user.enabled, que controla el inicio de sesión.
       operationId: assignCase
       parameters:
         - $ref: '#/components/parameters/CaseId'
@@ -426,21 +1134,225 @@ paths:
                   format: uuid
       responses:
         '204':
-          description: Caso habilitado
+          description: Caso asignado y cambiado a ENABLED_FOR_PROCESSING
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: Rol no autorizado, cuenta deshabilitada, caso fuera de la cola operativa del coordinador, destinatario no elegible o intento de autoasignación.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: El caso no está en FILES_RECEIVED o no puede asignarse en su estado actual
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      summary: Consulta investigadores asignados al caso
+      operationId: getCaseAssignments
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: Investigadores y sus perfiles; researcherIds se deriva de las filas vigentes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseAssignments' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Reemplaza los investigadores con acceso al caso
+      description: |
+        Solo coordinación o administración con cuenta habilitada. Reemplaza el
+        conjunto de investigadores del caso de forma atómica y permite varias
+        asignaciones. Se permiten cambios cuando el caso está en FILES_RECEIVED,
+        ENABLED_FOR_PROCESSING, RESULT_UPLOADED o RESULT_AVAILABLE y tiene un
+        archivo de entrada activo. No se permiten cambios durante
+        INPUT_CHANGE_DRAFT o INPUT_CHANGE_REVIEW. Las altas requieren investigadores
+        habilitados con authorizationStatus AUTHORIZED. Los investigadores RESTRICTED
+        que ya tenían acceso conservan su asignación aunque se omitan de la lista.
+        La operación no cambia el estado del caso.
+      operationId: replaceCaseAssignments
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [researcherIds]
+              properties:
+                researcherIds:
+                  type: array
+                  uniqueItems: true
+                  items: { type: string, format: uuid }
+      responses:
+        '200': { description: Conjunto de asignaciones actualizado, content: { application/json: { schema: { $ref: '#/components/schemas/CaseAssignments' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /operations/cases/academic:
+    get:
+      summary: Lista casos académicos para la vista de coordinación
+      description: Incluye fecha de recepción y última actualización del caso; solo devuelve casos con un archivo de entrada activo.
+      operationId: listAcademicCases
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { type: string, enum: [FILES_RECEIVED, ENABLED_FOR_PROCESSING, INPUT_CHANGE_DRAFT, INPUT_CHANGE_REVIEW, RESULT_UPLOADED, RESULT_AVAILABLE] }
+        - in: query
+          name: sort
+          schema: { type: string, default: 'receivedAt,desc', enum: ['receivedAt,asc', 'receivedAt,desc', 'referenceCode,asc', 'referenceCode,desc', 'status,asc', 'status,desc'] }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: size
+          schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+      responses:
+        '200':
+          description: Página de casos académicos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, size, totalItems, totalPages, appliedFilters]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/CoordinatorAcademicCase' } }
+                  page: { type: integer }
+                  size: { type: integer }
+                  totalItems: { type: integer }
+                  totalPages: { type: integer }
+                  appliedFilters: { type: object }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /operations/cases/academic/{caseId}:
+    get:
+      summary: Obtiene el detalle académico de un caso para coordinación
+      description: |
+        Solo coordinación habilitada. Devuelve metadatos del caso, archivos INPUT
+        vigentes, investigadores con acceso, versiones de resultado vigentes o
+        pendientes de publicación, y actividad operativa asociada. Los resultados
+        solo se devuelven si el coordinador tiene una asignación operativa vigente
+        al caso; canReviewResults indica si puede revisarlos o publicarlos. No incluye
+        archivos propuestos de solicitudes de cambio ni versiones de resultado
+        eliminadas. El historial contiene eventos que tienen fecha persistida en
+        el modelo actual; no es un registro de auditoría completo de cambios de
+        asignación.
+      operationId: getCoordinatorAcademicCaseDetail
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: Detalle del caso académico
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CoordinatorAcademicCaseDetail' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /operations/researchers/{researcherId}/cases:
+    get:
+      summary: Consulta casos asignados y no asignados para un investigador
+      operationId: listResearcherCases
+      parameters:
+        - in: path
+          name: researcherId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: sort
+          schema: { type: string, default: 'receivedAt,desc' }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: size
+          schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+      responses:
+        '200':
+          description: Página de casos disponibles para asignar al investigador indicado; receivedAt puede ser null para registros históricos sin fecha migrada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, size, totalItems, totalPages, appliedFilters]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AcademicAssignmentCase' } }
+                  page: { type: integer }
+                  size: { type: integer }
+                  totalItems: { type: integer }
+                  totalPages: { type: integer }
+                  appliedFilters: { type: object }
+  /operations/researchers/{researcherId}/case-assignments:
+    put:
+      summary: Asigna casos recibidos a un investigador
+      description: |
+        Solo coordinación habilitada. Las nuevas asignaciones solo pueden incluir
+        casos en FILES_RECEIVED; el investigador debe estar habilitado y tener
+        authorizationStatus AUTHORIZED. Esta operación reemplaza el conjunto de
+        casos de un investigador; no limita a un investigador por caso. Un caso
+        puede tener varios investigadores mediante PUT
+        /operations/cases/{caseId}/assignments. Cada alta cambia FILES_RECEIVED a
+        ENABLED_FOR_PROCESSING.
+        La operación valida todo el conjunto de forma atómica. Solo modifica
+        asignaciones de casos FILES_RECEIVED; los casos ya ENABLED_FOR_PROCESSING
+        o más avanzados conservan su asignación y no pueden reasignarse por esta ruta.
+      operationId: replaceResearcherCases
+      parameters:
+        - in: path
+          name: researcherId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [caseIds]
+              properties:
+                caseIds: { type: array, uniqueItems: true, items: { type: string, format: uuid } }
+      responses:
+        '204': { description: Asignaciones actualizadas }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /operations/results:
+    get:
+      summary: Lista todos los resultados visibles para coordinación
+      operationId: listCoordinatorResults
+      description: Incluye resultados vigentes y cargas activas pendientes de publicación de todos los casos, sin requerir asignación individual al coordinador; omite versiones anteriores y bajas lógicas. El resumen se calcula sobre las filas filtradas antes de paginar.
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ResultStatus' } }
+        - { name: sort, in: query, schema: { type: string, default: 'uploadedAt,desc' } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+      responses:
+        '200':
+          description: Resultados, perfil uploader y agregados de coordinación
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CoordinatorResultsPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /operations/results/{resultId}/availability:
     post:
       summary: Marca un resultado como disponible
       description: |
-        Publica el resultado asociado a resultId. Solo un coordinador con cuenta
-        habilitada y asignación explícita al caso puede ejecutar la operación.
+        Publica el resultado asociado a resultId. Cualquier coordinador con cuenta
+        habilitada puede ejecutar la operación, sin asignación individual al caso.
         El servidor resuelve el caso desde resultId y exige la transición atómica
         del resultado de UPLOADED a AVAILABLE y del caso de RESULT_UPLOADED a
-        RESULT_AVAILABLE. La operación es idempotente solo en el sentido de que
-        una publicación repetida se rechaza; no vuelve a publicar un resultado.
+        RESULT_AVAILABLE. La primera publicación es la versión 1 de tipo INITIAL.
+        Publicar una versión corregida la establece como vigente con tipo CORRECTED,
+        conservando las versiones anteriores en el historial.
 
         La publicación registra availableAt. La notificación asíncrona es un
         detalle interno de infraestructura y no tiene endpoint ni payload HTTP
@@ -460,14 +1372,56 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /operations/results/{resultId}/correction-requests:
+    post:
+      summary: Devuelve un resultado cargado o publicado para corrección
+      description: |
+        Cualquier coordinador habilitado puede devolver el resultado vigente para
+        corrección, sin asignación individual al caso. Acepta un resultado UPLOADED de un caso RESULT_UPLOADED
+        pendiente de revisión o un resultado AVAILABLE de un caso RESULT_AVAILABLE.
+        Cambia el resultado a CORRECTION_REQUIRED, guarda el motivo y devuelve el caso
+        a ENABLED_FOR_PROCESSING para que el investigador prepare una nueva carga.
+        Al confirmarse la nueva carga, atiende la solicitud y deja la versión nueva
+        pendiente de revisión; su publicación la convierte en CORRECTED y vigente.
+      operationId: requestResultCorrection
+      parameters:
+        - $ref: '#/components/parameters/ResultId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 4000
+      responses:
+        '204':
+          description: La corrección quedó solicitada
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /cases/{caseId}/result:
     get:
-      summary: Obtiene una intención de descarga del resultado disponible del paciente
+      summary: Obtiene una intención de descarga de un resultado disponible propio
       operationId: getPatientResult
-      description: Solo paciente propietario de caseId; el resultado debe pertenecer a ese caso y estar disponible.
-        La respuesta no contiene datos clínicos. La URL de descarga es temporal y su
-        duración se configura en el backend. Si el caso o resultado aún no está
-        publicado, responde 409; nunca se emite la URL antes de la disponibilidad.
+      description: |
+        Cualquier rol habilitado propietario de caseId (PATIENT, RESEARCHER,
+        COORDINATOR o ADMIN); el resultado debe pertenecer a ese caso y estar
+        disponible. Los casos asignados no se consultan mediante este endpoint
+        personal. La respuesta no contiene datos clínicos. La URL de descarga es
+        temporal y su duración se configura en el backend. Si el caso o resultado
+        aún no está publicado, responde 409; nunca se emite la URL antes de la
+        disponibilidad.
       parameters:
         - $ref: '#/components/parameters/CaseId'
       responses:
@@ -485,6 +1439,166 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /patient/results:
+    get:
+      summary: Lista resultados publicados vigentes del usuario autenticado
+      operationId: listPatientResults
+      description: Solo incluye la versión AVAILABLE, vigente y no eliminada de casos propios del usuario autenticado. Disponible para PATIENT, RESEARCHER, COORDINATOR y ADMIN. Los resultados de casos asignados se consultan desde espacios operativos. La búsqueda y publicationType filtran filas; summary cuenta todos los resultados descargables del usuario.
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: sort
+          in: query
+          schema: { type: string, default: "availableAt,desc", example: "availableAt,desc" }
+        - name: publicationType
+          in: query
+          schema: { type: string, enum: [INITIAL, CORRECTED] }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+      responses:
+        '200':
+          description: Resultados vigentes de casos propios del usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientResults'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /patient/dashboard:
+    get:
+      summary: Compone el dashboard del paciente autenticado
+      operationId: getPatientDashboard
+      description: >-
+        Disponible únicamente para PATIENT con cuenta habilitada. Devuelve casos propios,
+        acciones derivables del estado del caso (incluye retomar borrador de cambio o
+        esperar revisión de coordinación), hasta cinco eventos de actividad visibles en sus
+        casos, y hasta tres resultados vigentes únicos. La actividad agrega los casos cuyo
+        propietario es el paciente autenticado. Los permisos y tipos visibles se filtran antes
+        del límite; RESULT_PUBLISHED solo se incluye mientras el resultado siga AVAILABLE y
+        no eliminado. Se ordena por occurredAt DESC e id DESC. La respuesta de actividad solo
+        contiene id, type, occurredAt y caseReferenceCode; el cliente presenta textos fijos.
+        No incluye notificaciones, auditoría ni telemetría técnica. summary.availableResults
+        cuenta exactamente las filas devueltas. Los dashboards de RESEARCHER, COORDINATOR y
+        ADMIN usan contratos y endpoints propios. La bandeja de notificaciones permanece
+        separada.
+      responses:
+        '200':
+          description: Dashboard del paciente autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientDashboard'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /notifications:
+    get:
+      summary: Lista avisos del paciente autenticado
+      operationId: listPatientNotifications
+      description: |
+        Disponible únicamente para PATIENT con cuenta habilitada. El destinatario se
+        deriva de la identidad autenticada. Lista avisos paginados en orden
+        createdAt DESC e id DESC; page inicia en cero, size por defecto 20 y máximo 100.
+        El estado de lectura se representa mediante readAt y es independiente del
+        estado de entrega por canal. En el alcance inicial solo se materializa
+        RESULT_AVAILABLE a partir de RESULT_PUBLISHED. caseReferenceCode se devuelve
+        tras comprobar que el caso pertenece al destinatario autenticado y permite
+        navegar al detalle del caso, que vuelve a aplicar la autorización.
+
+        Matriz vigente: RESULT_PUBLISHED notifica solo al paciente propietario del
+        caso. IN_APP se crea siempre; EMAIL se programa solo si la preferencia
+        RESULT_AVAILABLE está habilitada y el canal está disponible. INPUT_CHANGE_OPENED
+        registra que el paciente abre su propio borrador y no genera un aviso. Los
+        demás eventos de actividad tampoco generan avisos en esta fase.
+
+        Internamente, el outbox usa PENDING, PROCESSING, COMPLETED o FAILED. Cada
+        canal usa PENDING, PROCESSING, SENT, DELIVERED, FAILED o SKIPPED. Para EMAIL,
+        SENT confirma únicamente la aceptación por SQS, no que Lambda haya procesado
+        el mensaje ni que el email haya llegado. DELIVERED requiere un acuse verificable
+        del proveedor y todavía no está integrado. Los fallos temporales/timeouts al
+        publicar a SQS se reintentan hasta cinco intentos lógicos, con esperas de 30,
+        60, 120 y 240 segundos; los errores permanentes, de configuración o de
+        serialización quedan FAILED sin reintento. Después de la aceptación, Lambda
+        devuelve fallos parciales para que SQS redelivere; la deduplicación por eventId
+        evita repetir el envío tras un procesamiento exitoso. El movimiento a DLQ y el
+        agotamiento dependen de la política de redrive configurada en la cola, que no
+        está gestionada/versionada en este repositorio. Los fallos del consumidor SES
+        no cambian hoy el estado EMAIL ya marcado SENT. El API público expone readAt,
+        pero no los estados internos de entrega por canal.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Página de avisos del paciente autenticado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationInboxPage' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /notifications/{notificationId}/read:
+    post:
+      summary: Marca como leído un aviso del paciente autenticado
+      operationId: markPatientNotificationRead
+      description: |
+        Idempotente: conserva la primera fecha de lectura. Solo afecta avisos cuyo
+        destinatario sea la identidad autenticada; un ID ajeno o inexistente devuelve
+        404 sin revelar su propietario.
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Aviso con su fecha de lectura
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationInboxItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /notifications/preferences:
+    get:
+      summary: Consulta la preferencia de email para resultados
+      operationId: getPatientNotificationPreferences
+      description: Disponible únicamente para PATIENT con cuenta habilitada. IN_APP siempre permanece habilitado.
+      responses:
+        '200':
+          description: Preferencias de notificación disponibles
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /notifications/preferences/email:
+    put:
+      summary: Actualiza la preferencia de email para resultados
+      operationId: setPatientResultEmailPreference
+      description: La preferencia controla EMAIL para RESULT_AVAILABLE; no elimina avisos IN_APP existentes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationEmailPreferenceRequest' }
+      responses:
+        '200':
+          description: Preferencia actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 components:
   securitySchemes:
     bearerAuth:
@@ -509,6 +1623,13 @@ components:
         format: uuid
     ResultId:
       name: resultId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    InputChangeRequestId:
+      name: requestId
       in: path
       required: true
       schema:
@@ -552,6 +1673,151 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    AuthorizationStatus:
+      type: string
+      enum: [AUTHORIZED, RESTRICTED]
+    Researcher:
+      type: object
+      required: [userId, researcherCode, fullName, email, authorizationStatus, assignedCaseCount]
+      properties:
+        userId: { type: string, format: uuid }
+        researcherCode: { type: [string, 'null'] }
+        fullName: { type: [string, 'null'] }
+        email: { type: string, format: email }
+        authorizationStatus: { $ref: '#/components/schemas/AuthorizationStatus' }
+        assignedCaseCount: { type: integer, minimum: 0 }
+    ResearcherAssignment:
+      type: object
+      required: [userId, email, authorizationStatus, assignedCaseCount]
+      properties:
+        userId: { type: string, format: uuid }
+        researcherCode: { type: [string, 'null'] }
+        fullName: { type: [string, 'null'] }
+        email: { type: string, format: email }
+        authorizationStatus: { $ref: '#/components/schemas/AuthorizationStatus' }
+        assignedCaseCount: { type: integer, minimum: 0 }
+    CaseAssignments:
+      type: object
+      required: [caseId, researchers, researcherIds]
+      properties:
+        caseId: { type: string, format: uuid }
+        researchers: { type: array, items: { $ref: '#/components/schemas/ResearcherAssignment' } }
+        researcherIds: { type: array, items: { type: string, format: uuid } }
+    AcademicAssignmentCase:
+      type: object
+      required: [id, referenceCode, studyName, status, receivedAt, updatedAt, isAssigned]
+      properties:
+        id: { type: string, format: uuid }
+        referenceCode: { type: string }
+        studyName: { type: string }
+        status: { type: string, enum: [FILES_RECEIVED, ENABLED_FOR_PROCESSING, INPUT_CHANGE_DRAFT, INPUT_CHANGE_REVIEW, RESULT_UPLOADED, RESULT_AVAILABLE] }
+        receivedAt: { type: [string, 'null'], format: date-time, description: Fecha oficial de recepción; puede ser null para registros históricos sin fecha migrada. }
+        updatedAt: { type: [string, 'null'], format: date-time, description: Fecha de última actualización persistida del caso. }
+        isAssigned: { type: boolean }
+    CoordinatorAcademicCase:
+      type: object
+      required: [id, referenceCode, studyName, status, receivedAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        referenceCode: { type: string }
+        studyName: { type: string }
+        status: { type: string, enum: [FILES_RECEIVED, ENABLED_FOR_PROCESSING, INPUT_CHANGE_DRAFT, INPUT_CHANGE_REVIEW, RESULT_UPLOADED, RESULT_AVAILABLE] }
+        receivedAt: { type: [string, 'null'], format: date-time, description: Fecha oficial de recepción; puede ser null para registros históricos sin fecha migrada. }
+        updatedAt: { type: [string, 'null'], format: date-time, description: Fecha de última actualización persistida del caso. }
+    CoordinatorAcademicCaseDetail:
+      type: object
+      required: [case, inputFiles, researchers, results, history, canReviewResults]
+      properties:
+        case: { $ref: '#/components/schemas/CoordinatorAcademicCaseDetailInfo' }
+        inputFiles:
+          type: array
+          description: Archivos INPUT vigentes del caso, excluye propuestas no aprobadas.
+          items: { $ref: '#/components/schemas/AcademicCaseInputFile' }
+        researchers:
+          type: array
+          description: Investigadores que tienen acceso vigente al caso.
+          items: { $ref: '#/components/schemas/AcademicCaseResearcher' }
+        results:
+          type: array
+          description: Versiones vigentes y cargas activas pendientes de publicación o corrección.
+          items: { $ref: '#/components/schemas/CoordinatorResultItem' }
+        history:
+          type: array
+          description: Actividad operativa derivada de fechas persistidas; no representa auditoría completa de cambios de asignación.
+          items: { $ref: '#/components/schemas/AcademicCaseHistoryEvent' }
+        canReviewResults: { type: boolean, description: Indica si el coordinador tiene asignación operativa al caso. Si es false, results estará vacío. }
+    CoordinatorAcademicCaseDetailInfo:
+      allOf:
+        - $ref: '#/components/schemas/CaseDetails'
+        - type: object
+          required: [receivedAt]
+          properties:
+            receivedAt: { type: [string, 'null'], format: date-time, description: Fecha oficial de recepción; puede ser null para registros históricos sin fecha migrada. }
+    AcademicCaseInputFile:
+      type: object
+      required: [id, originalFilename, contentType, sizeBytes, uploadedAt]
+      properties:
+        id: { type: string, format: uuid }
+        originalFilename: { type: string }
+        contentType: { type: [string, 'null'] }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        uploadedAt: { type: [string, 'null'], format: date-time }
+    AcademicCaseResearcher:
+      type: object
+      required: [userId, fullName, email, authorizationStatus, assignedAt]
+      properties:
+        userId: { type: string, format: uuid }
+        fullName: { type: [string, 'null'] }
+        email: { type: string, format: email }
+        authorizationStatus: { $ref: '#/components/schemas/AuthorizationStatus' }
+        assignedAt: { type: [string, 'null'], format: date-time }
+    AcademicCaseHistoryEvent:
+      type: object
+      required: [type, occurredAt, description]
+      properties:
+        type:
+          type: string
+          enum: [CASE_CREATED, FILES_RECEIVED, RESEARCHER_ASSIGNED, RESULT_UPLOADED, RESULT_AVAILABLE, RESULT_CORRECTION_REQUESTED, INPUT_CHANGE_STARTED, INPUT_CHANGE_SUBMITTED, INPUT_CHANGE_DECIDED, INPUT_CHANGE_CANCELLED]
+        occurredAt: { type: string, format: date-time }
+        description: { type: string }
+        relatedId: { type: [string, 'null'], format: uuid, description: ID del investigador, resultado o solicitud de cambio relacionado, cuando aplica. }
+        actorUserId: { type: [string, 'null'], format: uuid }
+    ResearcherDirectory:
+      type: object
+      required: [summary, items, page, size, totalItems, totalPages, appliedFilters]
+      properties:
+        summary:
+          type: object
+          required: [totalResearchers, authorizedResearchers, totalAssignedCases]
+          properties:
+            totalResearchers: { type: integer }
+            authorizedResearchers: { type: integer }
+            totalAssignedCases: { type: integer }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Researcher' }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer }
+        totalPages: { type: integer }
+        appliedFilters:
+          type: object
+          properties:
+            q: { type: string }
+            status: { oneOf: [{ $ref: '#/components/schemas/AuthorizationStatus' }, { type: 'null' }] }
+            sort: { type: string }
+    UserRoleResponse:
+      type: object
+      required: [userId, email, role, enabled, fullName, researcherCode, authorizationStatus]
+      properties:
+        userId: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/UserRole' }
+        enabled: { type: boolean }
+        fullName: { type: [string, 'null'] }
+        researcherCode: { type: [string, 'null'] }
+        authorizationStatus:
+          oneOf: [{ $ref: '#/components/schemas/AuthorizationStatus' }, { type: 'null' }]
     InternalUser:
       type: object
       required: [id, email, role]
@@ -595,11 +1861,119 @@ components:
       enum: [patient, researcher, coordinator, admin]
     CaseStatus:
       type: string
-      enum: [CREATED, FILES_RECEIVED, ENABLED_FOR_PROCESSING, RESULT_UPLOADED, RESULT_AVAILABLE]
+      description: Estado único del caso, que refleja el paso pendiente del registro o su ciclo operativo, incluida la edición y revisión de cambios de INPUT.
+      enum: [CONSENT_PENDING, FILE_PENDING, CONFIRMATION_PENDING, FILES_RECEIVED, INPUT_CHANGE_DRAFT, INPUT_CHANGE_REVIEW, ENABLED_FOR_PROCESSING, RESULT_UPLOADED, RESULT_AVAILABLE]
     ResultStatus:
       type: string
-      description: Estado del resultado; la publicación válida solo permite UPLOADED a AVAILABLE.
-      enum: [UPLOADED, AVAILABLE]
+      description: Estado de una versión de resultado, que representa un único archivo. Las listas habituales exponen la versión vigente y omiten versiones DELETED.
+      enum: [UPLOADED, AVAILABLE, CORRECTION_REQUIRED, DELETED]
+    ResultPublicationType:
+      type: [string, 'null']
+      enum: [INITIAL, CORRECTED, null]
+    ResultCase:
+      type: object
+      required: [id, referenceCode, studyName]
+      properties:
+        id: { type: string, format: uuid }
+        referenceCode: { type: string }
+        studyName: { type: string }
+    ResultUploader:
+      type: [object, 'null']
+      properties:
+        userId: { type: string, format: uuid }
+        studentCode: { type: [string, 'null'] }
+        fullName: { type: [string, 'null'] }
+    ResultFile:
+      type: object
+      required: [id, originalFilename]
+      properties:
+        id: { type: string, format: uuid }
+        originalFilename: { type: string }
+        contentType: { type: [string, 'null'] }
+        sizeBytes: { type: [integer, 'null'], format: int64 }
+        extension: { type: [string, 'null'] }
+    ResultCorrectionRequest:
+      type: [string, 'null']
+      description: Motivo mientras status sea CORRECTION_REQUIRED; null en los demás estados.
+    ResearcherResultItem:
+      type: object
+      required: [id, originalFilename, case, status, version, publicationType, correctionRequest]
+      properties:
+        id: { type: string, format: uuid }
+        originalFilename: { type: string }
+        contentType: { type: [string, 'null'] }
+        sizeBytes: { type: [integer, 'null'], format: int64 }
+        case: { $ref: '#/components/schemas/ResultCase' }
+        status: { $ref: '#/components/schemas/ResultStatus' }
+        uploadedAt: { type: [string, 'null'], format: date-time }
+        updatedAt: { type: [string, 'null'], format: date-time }
+        version: { type: integer, minimum: 1, description: En UPLOADED, número prospectivo de la siguiente versión a publicar. }
+        publicationType: { $ref: '#/components/schemas/ResultPublicationType' }
+        correctionRequest: { $ref: '#/components/schemas/ResultCorrectionRequest' }
+        availableAt: { type: [string, 'null'], format: date-time }
+    CoordinatorResultItem:
+      type: object
+      required: [id, file, case, uploadedBy, version, status, correctionRequest]
+      properties:
+        id: { type: string, format: uuid }
+        file: { $ref: '#/components/schemas/ResultFile' }
+        case: { $ref: '#/components/schemas/ResultCase' }
+        uploadedBy: { $ref: '#/components/schemas/ResultUploader' }
+        uploadedAt: { type: [string, 'null'], format: date-time }
+        updatedAt: { type: [string, 'null'], format: date-time }
+        version: { type: integer, minimum: 1 }
+        status: { $ref: '#/components/schemas/ResultStatus' }
+        correctionRequest: { $ref: '#/components/schemas/ResultCorrectionRequest' }
+        publicationType: { $ref: '#/components/schemas/ResultPublicationType' }
+        availableAt: { type: [string, 'null'], format: date-time }
+        deletedAt: { type: [string, 'null'], format: date-time }
+        deletionReason: { type: [string, 'null'] }
+    ResultListSummary:
+      type: object
+      required: [total, uploaded, available, correctionRequired]
+      properties:
+        total: { type: integer }
+        uploaded: { type: integer }
+        available: { type: integer }
+        correctionRequired: { type: integer }
+    ResultAppliedFilters:
+      type: object
+      required: [q, status, sort]
+      properties:
+        q: { type: string }
+        status: { allOf: [{ $ref: '#/components/schemas/ResultStatus' }], nullable: true }
+        sort: { type: string }
+    ResearcherResultsPage:
+      type: object
+      required: [items, summary, page, size, totalItems, totalPages, appliedFilters]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ResearcherResultItem' } }
+        summary: { $ref: '#/components/schemas/ResultListSummary' }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer }
+        totalPages: { type: integer }
+        appliedFilters: { $ref: '#/components/schemas/ResultAppliedFilters' }
+    CoordinatorResultsPage:
+      type: object
+      required: [items, summary, page, size, totalItems, totalPages, appliedFilters]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CoordinatorResultItem' } }
+        summary: { $ref: '#/components/schemas/ResultListSummary' }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer }
+        totalPages: { type: integer }
+        appliedFilters: { $ref: '#/components/schemas/ResultAppliedFilters' }
+    ResultHistoryPage:
+      type: object
+      required: [items, page, size, totalItems, totalPages]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CoordinatorResultItem' } }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer }
+        totalPages: { type: integer }
     UserProfile:
       type: object
       required: [id, email, role, enabled]
@@ -617,7 +1991,7 @@ components:
           description: Indica si la cuenta está habilitada para operar.
     CaseSummary:
       type: object
-      required: [id, referenceCode, status, studyName, createdAt]
+      required: [id, referenceCode, status, studyName, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -626,18 +2000,55 @@ components:
           type: string
         studyName:
           type: string
-          description: Nombre del estudio proporcionado por el paciente.
+          description: Nombre del estudio proporcionado por el usuario que crea el caso.
         status:
           $ref: '#/components/schemas/CaseStatus'
         createdAt:
           type: string
           format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          description: Instante de la última modificación del caso, en UTC.
+        availableResultId:
+          type: [string, 'null']
+          format: uuid
+    PatientCasesPage:
+      type: object
+      required: [items, page, size, totalItems, totalPages, statusCounts, appliedFilters]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CaseSummary' }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer }
+        totalPages: { type: integer }
+        statusCounts:
+          type: object
+          required: [ALL, PENDING, IN_PROGRESS, RESULT_AVAILABLE]
+          properties:
+            ALL: { type: integer }
+            PENDING: { type: integer }
+            IN_PROGRESS: { type: integer }
+            RESULT_AVAILABLE: { type: integer }
+        appliedFilters:
+          type: object
+          required: [q, status, sort]
+          properties:
+            q: { type: string }
+            status: { type: string }
+            sort: { type: string }
     InternalCaseSummary:
       allOf:
         - $ref: '#/components/schemas/CaseSummary'
         - type: object
-          required: [files]
+          required: [files, receivedAt]
           properties:
+            receivedAt:
+              type: string
+              format: date-time
+              description: Fecha oficial persistida en el caso al confirmar el envío y pasar a FILES_RECEIVED.
             files:
               type: array
               items:
@@ -645,16 +2056,87 @@ components:
             result:
               description: Resumen del resultado asociado, cuando existe.
               $ref: '#/components/schemas/ResultSummary'
+    ResearcherAcademicCaseDetail:
+      type: object
+      required: [case, inputFiles, researchers, results]
+      properties:
+        case: { $ref: '#/components/schemas/CoordinatorAcademicCaseDetailInfo' }
+        inputFiles:
+          type: array
+          items: { $ref: '#/components/schemas/AcademicCaseInputFile' }
+        researchers:
+          type: array
+          description: Investigadores habilitados asignados al caso, visibles para quienes también tienen acceso.
+          items: { $ref: '#/components/schemas/ResearcherCaseAccess' }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/ResearcherCaseResult' }
+    ResearcherCaseAccess:
+      type: object
+      required: [userId, fullName, researcherCode, authorizationStatus, assignedAt]
+      properties:
+        userId: { type: string, format: uuid }
+        fullName: { type: [string, 'null'] }
+        researcherCode: { type: [string, 'null'] }
+        authorizationStatus: { type: [string, 'null'], enum: [AUTHORIZED, RESTRICTED, null] }
+        assignedAt: { type: [string, 'null'], format: date-time }
+    ResearcherCaseResult:
+      type: object
+      required: [id, originalFilename, contentType, sizeBytes, uploadedAt, updatedAt, version, status, correctionRequest, publicationType, availableAt]
+      properties:
+        id: { type: string, format: uuid }
+        originalFilename: { type: string }
+        contentType: { type: [string, 'null'] }
+        sizeBytes: { type: [integer, 'null'], format: int64, minimum: 0 }
+        uploadedAt: { type: [string, 'null'], format: date-time }
+        updatedAt: { type: [string, 'null'], format: date-time }
+        version: { type: [integer, 'null'], minimum: 1 }
+        status: { type: string, enum: [UPLOADED, AVAILABLE, CORRECTION_REQUIRED] }
+        correctionRequest: { type: [string, 'null'] }
+        publicationType: { type: [string, 'null'], enum: [INITIAL, CORRECTED, null] }
+        availableAt: { type: [string, 'null'], format: date-time }
     CreateCaseRequest:
       type: object
       additionalProperties: false
-      required: [studyName]
+      required: [studyName, originInstitution, studyDate]
       properties:
         studyName:
           type: string
-          description: Nombre del estudio proporcionado por el paciente.
+          description: Nombre del estudio proporcionado por el usuario que crea el caso.
           minLength: 1
           maxLength: 200
+        additionalReference:
+          type: [string, 'null']
+          maxLength: 100
+          description: Referencia libre opcional para identificar el caso en el detalle; no es el referenceCode del sistema.
+        originInstitution:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Institución o centro donde se realizó el estudio.
+        studyDate:
+          type: string
+          format: date
+          description: Fecha del estudio, no posterior a la fecha actual de Colombia (America/Bogota).
+        notes:
+          type: [string, 'null']
+          maxLength: 500
+          description: Texto libre opcional mostrado únicamente en el detalle del caso.
+    CaseDetails:
+      type: object
+      required: [id, referenceCode, status, studyName, additionalReference, originInstitution, studyDate, notes, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        referenceCode: { type: string }
+        status: { $ref: '#/components/schemas/CaseStatus' }
+        studyName: { type: string, maxLength: 200 }
+        additionalReference: { type: [string, 'null'], maxLength: 100 }
+        originInstitution: { type: [string, 'null'], maxLength: 200, description: Null para casos históricos anteriores a V17. }
+        studyDate: { type: [string, 'null'], format: date, description: Null para casos históricos anteriores a V17. }
+        notes: { type: [string, 'null'], maxLength: 500 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        availableResultId: { type: [string, 'null'], format: uuid }
     FileSummary:
       type: object
       required: [id, originalFilename, sizeBytes, fileKind]
@@ -672,6 +2154,49 @@ components:
         fileKind:
           type: string
           enum: [INPUT, RESULT]
+    InputChangeRequestStatus:
+      type: string
+      enum: [DRAFT, PENDING_REVIEW, APPROVED, REJECTED, CANCELLED]
+    InputChangeRequest:
+      type: object
+      required: [id, caseId, requestedBy, status, reason, resumeCaseStatus, originalFiles, proposedFiles, createdAt, updatedAt, submittedAt, decidedAt, decisionReason]
+      properties:
+        id: { type: string, format: uuid }
+        caseId: { type: string, format: uuid }
+        requestedBy: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/InputChangeRequestStatus' }
+        reason: { type: [string, 'null'], maxLength: 250, description: Motivo breve del propietario; obligatorio antes del envío. }
+        resumeCaseStatus:
+          type: string
+          enum: [FILES_RECEIVED, ENABLED_FOR_PROCESSING]
+          description: Estado del caso al abrir el borrador; se restaura al cancelar, aprobar o rechazar. La asignación existente se conserva.
+        originalFiles:
+          type: array
+          description: Snapshot del conjunto vigente al abrir el borrador.
+          items: { $ref: '#/components/schemas/FileSummary' }
+        proposedFiles:
+          type: array
+          description: Conjunto final propuesto; incluye archivos conservados y nuevas cargas completadas.
+          items: { $ref: '#/components/schemas/FileSummary' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        decidedBy: { type: [string, 'null'], format: uuid }
+        decisionReason: { type: [string, 'null'], maxLength: 1000, description: Motivo obligatorio cuando coordinación rechaza. }
+    InputChangeRequestSummary:
+      type: object
+      required: [id, caseId, requestedBy, caseReferenceCode, studyName, reason, fileCount, createdAt, submittedAt]
+      properties:
+        id: { type: string, format: uuid }
+        caseId: { type: string, format: uuid }
+        requestedBy: { type: string, format: uuid }
+        caseReferenceCode: { type: string }
+        studyName: { type: string }
+        reason: { type: string, maxLength: 250 }
+        fileCount: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        submittedAt: { type: string, format: date-time }
     CompleteUploadResponse:
       type: object
       required: [file]
@@ -682,11 +2207,11 @@ components:
           description: Presente cuando el archivo confirmado es RESULT.
           $ref: '#/components/schemas/UploadedResult'
         caseStatus:
-          description: Estado del caso después de confirmar la carga.
+          description: Estado del caso después de confirmar la carga; para archivos de una propuesta permanece INPUT_CHANGE_DRAFT.
           $ref: '#/components/schemas/CaseStatus'
     UploadedResult:
       type: object
-      required: [id, caseId, status, uploadedBy, uploadedAt]
+      required: [id, caseId, status, uploadedBy, uploadedAt, version, publicationType, correctionRequest]
       properties:
         id:
           type: string
@@ -702,6 +2227,14 @@ components:
         uploadedAt:
           type: string
           format: date-time
+        version:
+          type: integer
+          minimum: 1
+        publicationType:
+          type: [string, 'null']
+          enum: [INITIAL, CORRECTED, null]
+        correctionRequest:
+          type: [string, 'null']
     ResultSummary:
       type: object
       required: [id, originalFilename, status, uploadedBy, uploadedAt]
@@ -720,8 +2253,19 @@ components:
           type: string
           format: date-time
         availableAt:
-          type: string
+          type: [string, 'null']
           format: date-time
+        version:
+          type: integer
+          minimum: 1
+          description: Número secuencial de la versión del resultado para el caso.
+        correctionRequest:
+          type: [string, 'null']
+          description: Motivo de corrección cuando el estado es CORRECTION_REQUIRED.
+        publicationType:
+          type: [string, 'null']
+          enum: [INITIAL, CORRECTED, null]
+          description: Tipo de publicación de la versión, definido al publicarla.
     CreateUploadIntentRequest:
       type: object
       required: [originalFilename, contentType, sizeBytes]
@@ -773,6 +2317,147 @@ components:
           format: date-time
         download:
           $ref: '#/components/schemas/DownloadIntent'
+    PatientResults:
+      type: object
+      required: [summary, items, totalItems, page, size]
+      properties:
+        summary:
+          type: object
+          required: [availableCaseCount, latestPublishedAt]
+          properties:
+            availableCaseCount: { type: integer, format: int64 }
+            latestPublishedAt: { type: string, format: date-time, nullable: true }
+        items:
+          type: array
+          items:
+            type: object
+            required: [resultId, caseId, caseReferenceCode, studyName, fileName, fileExtension, availableAt, publicationType]
+            properties:
+              resultId: { type: string, format: uuid }
+              caseId: { type: string, format: uuid }
+              caseReferenceCode: { type: string }
+              studyName: { type: string }
+              fileName: { type: string }
+              fileExtension: { type: string }
+              contentType: { type: string, nullable: true }
+              availableAt: { type: string, format: date-time }
+              publicationType: { type: string, enum: [INITIAL, CORRECTED] }
+        totalItems: { type: integer, format: int64 }
+        page: { type: integer }
+        size: { type: integer }
+    NotificationInboxPage:
+      type: object
+      required: [items, page, size, totalElements, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/NotificationInboxItem' }
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1, maximum: 100 }
+        totalElements: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+    NotificationInboxItem:
+      type: object
+      description: >-
+        Payload mínimo para mostrar y marcar un aviso. No expone el ID del caso ni
+        identificadores de resultado; caseReferenceCode se incluye solo para navegar
+        al caso propio después de comprobar su propiedad.
+      required: [id, type, caseReferenceCode, createdAt, readAt]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [RESULT_AVAILABLE] }
+        caseReferenceCode: { type: string, description: Código de referencia del caso propio, usado por la ruta del portal. }
+        createdAt: { type: string, format: date-time }
+        readAt: { type: [string, 'null'], format: date-time }
+    NotificationPreferences:
+      type: object
+      required: [emailForResultsEnabled]
+      properties:
+        emailForResultsEnabled: { type: boolean }
+    NotificationEmailPreferenceRequest:
+      type: object
+      required: [enabled]
+      additionalProperties: false
+      properties:
+        enabled: { type: boolean }
+    PatientDashboard:
+      type: object
+      required: [summary, recentCases, nextSteps, recentActivity, availableResults]
+      properties:
+        summary:
+          type: object
+          required: [activeCases, inProgressCases, availableResults]
+          properties:
+            activeCases: { type: integer, format: int64, description: Total de casos propios del usuario autenticado. }
+            inProgressCases: { type: integer, format: int64, description: Casos ENABLED_FOR_PROCESSING o RESULT_UPLOADED. }
+            availableResults: { type: integer, format: int64, description: Conteo exacto de availableResults devueltos (máximo tres). }
+        recentCases:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [id, referenceCode, studyName, status, createdAt]
+            properties:
+              id: { type: string, format: uuid }
+              referenceCode: { type: string }
+              studyName: { type: string }
+              status: { $ref: '#/components/schemas/CaseStatus' }
+              createdAt: { type: string, format: date-time }
+        nextSteps:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [id, caseId, caseReferenceCode, type, title, description, priority, createdAt, action]
+            properties:
+              id: { type: string, format: uuid }
+              caseId: { type: string, format: uuid }
+              caseReferenceCode: { type: string }
+              type:
+                type: string
+                description: EDIT_INPUT_CHANGE retoma un borrador del propietario; WAIT_COORDINATOR_REVIEW indica una solicitud bloqueada en revisión.
+                enum: [ACCEPT_CONSENT, UPLOAD_FILE, CONFIRM_CASE, EDIT_INPUT_CHANGE, WAIT_COORDINATOR_REVIEW, VIEW_RESULT]
+              title: { type: string }
+              description: { type: string }
+              priority: { type: string, enum: [HIGH, NORMAL, LOW] }
+              createdAt: { type: string, format: date-time }
+              action:
+                type: object
+                required: [type, label]
+                properties:
+                  type: { type: string }
+                  label: { type: string }
+        recentActivity:
+          type: array
+          maxItems: 5
+          description: >-
+            Actividad de negocio visible al paciente autenticado, agregada únicamente sobre
+            sus casos. Se filtran propiedad, audiencia por tipo y vigencia del resultado antes
+            de aplicar el máximo de cinco. Orden descendente por occurredAt y luego id. Solo
+            devuelve estos campos; título y descripción se derivan en el cliente mediante
+            plantillas neutrales por tipo y referencia.
+          items:
+            type: object
+            required: [id, type, occurredAt, caseReferenceCode]
+            properties:
+              id: { type: string, format: uuid }
+              type:
+                type: string
+                enum: [CASE_CREATED, CONSENT_ACCEPTED, FILE_RECEIVED, CASE_PROCESSING_ENABLED, RESULT_PUBLISHED, INPUT_CHANGE_OPENED, INPUT_CHANGE_SUBMITTED, INPUT_CHANGE_APPROVED, INPUT_CHANGE_REJECTED, INPUT_CHANGE_CANCELLED]
+              occurredAt: { type: string, format: date-time }
+              caseReferenceCode: { type: string }
+        availableResults:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            required: [id, caseId, caseReferenceCode, studyName, availableAt]
+            properties:
+              id: { type: string, format: uuid }
+              caseId: { type: string, format: uuid }
+              caseReferenceCode: { type: string }
+              studyName: { type: string }
+              availableAt: { type: string, format: date-time }
     ErrorResponse:
       type: object
       required: [code, message, traceId]
@@ -792,13 +2477,13 @@ components:
           type: string
           minLength: 1
           description: >
-            Versión de los términos y condiciones que el paciente acepta,
+            Versión de los términos y condiciones que el propietario del caso acepta,
             por ejemplo "1.0". El servidor rechaza versiones desconocidas con 400.
         acceptedAt:
           type: string
           format: date-time
           description: >
-            Timestamp ISO-8601 en el que el paciente confirma la aceptación
+            Timestamp ISO-8601 en el que el propietario del caso confirma la aceptación
             desde el cliente. Si se omite, el servidor usa su propio timestamp.
     ConsentRecord:
       type: object
