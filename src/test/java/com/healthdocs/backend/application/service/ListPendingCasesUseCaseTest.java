@@ -46,7 +46,7 @@ class ListPendingCasesUseCaseTest {
                 fileId, caseEntity, "input/key/rx.dcm", FileKind.INPUT, "rx.dcm", "application/dicom", 1024L);
 
         when(cases.findPendingCases(CaseStatus.FILES_RECEIVED)).thenReturn(List.of(caseEntity));
-        when(files.findByMedicalCaseId(caseId)).thenReturn(List.of(inputFile));
+        when(files.findByMedicalCaseIdAndFileKindAndInputActiveTrue(caseId, FileKind.INPUT)).thenReturn(List.of(inputFile));
 
         ListPendingCasesUseCase useCase = new ListPendingCasesUseCase(cases, files);
         List<ListPendingCasesUseCase.PendingCaseView> result = useCase.execute(professor(true));
@@ -63,11 +63,11 @@ class ListPendingCasesUseCaseTest {
         assertEquals(FileKind.INPUT, view.files().get(0).fileKind());
 
         verify(cases).findPendingCases(CaseStatus.FILES_RECEIVED);
-        verify(files).findByMedicalCaseId(caseId);
+        verify(files).findByMedicalCaseIdAndFileKindAndInputActiveTrue(caseId, FileKind.INPUT);
     }
 
     @Test
-    void filtersOutNonInputFilesFromCaseView() {
+    void queriesOnlyInputFilesForPendingCase() {
         UUID caseId = UUID.randomUUID();
         AppUserEntity patient = new AppUserEntity("pat", "pat@test.local", Role.PATIENT);
         MedicalCaseEntity caseEntity = new MedicalCaseEntity(
@@ -76,11 +76,8 @@ class ListPendingCasesUseCaseTest {
         UUID inputFileId = UUID.randomUUID();
         StoredFileEntity inputFile = new StoredFileEntity(
                 inputFileId, caseEntity, "input/key/rx.dcm", FileKind.INPUT, "rx.dcm", "application/dicom", 1024L);
-        StoredFileEntity resultFile = new StoredFileEntity(
-                UUID.randomUUID(), caseEntity, "result/key/res.pdf", FileKind.RESULT, "res.pdf", "application/pdf", 2048L);
-
         when(cases.findPendingCases(CaseStatus.FILES_RECEIVED)).thenReturn(List.of(caseEntity));
-        when(files.findByMedicalCaseId(caseId)).thenReturn(List.of(inputFile, resultFile));
+        when(files.findByMedicalCaseIdAndFileKindAndInputActiveTrue(caseId, FileKind.INPUT)).thenReturn(List.of(inputFile));
 
         ListPendingCasesUseCase useCase = new ListPendingCasesUseCase(cases, files);
         List<ListPendingCasesUseCase.PendingCaseView> result = useCase.execute(professor(true));

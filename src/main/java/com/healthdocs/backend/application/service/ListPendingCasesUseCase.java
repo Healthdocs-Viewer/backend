@@ -35,8 +35,7 @@ public class ListPendingCasesUseCase {
     }
 
     private PendingCaseView toView(MedicalCaseEntity c) {
-        List<FileView> fileViews = files.findByMedicalCaseId(c.getId()).stream()
-                .filter(f -> f.getFileKind() == FileKind.INPUT)
+        List<FileView> fileViews = files.findByMedicalCaseIdAndFileKindAndInputActiveTrue(c.getId(), FileKind.INPUT).stream()
                 .map(f -> new FileView(
                         f.getId(),
                         f.getOriginalFilename(),

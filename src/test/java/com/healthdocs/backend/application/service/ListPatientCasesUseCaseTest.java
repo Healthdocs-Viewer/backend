@@ -1,7 +1,6 @@
 package com.healthdocs.backend.application.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -11,6 +10,7 @@ import com.healthdocs.backend.domain.model.CaseStatus;
 import com.healthdocs.backend.domain.model.MedicalCase;
 import com.healthdocs.backend.domain.model.Role;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,8 @@ class ListPatientCasesUseCaseTest {
     @Test
     void listsOnlyCasesForAuthenticatedPatient() {
         UUID patientId = UUID.randomUUID();
-        MedicalCase ownCase = MedicalCase.create(UUID.randomUUID(), patientId, "CAS-001", "TAC", NOW);
+        MedicalCase ownCase = MedicalCase.create(UUID.randomUUID(), patientId, "CAS-001", "TAC", null,
+                "Centro de prueba", LocalDate.of(2026, 9, 15), null, NOW);
         when(cases.findAllByPatientId(patientId)).thenReturn(List.of(ownCase));
 
         List<ListPatientCasesUseCase.CaseView> result =
@@ -40,13 +41,11 @@ class ListPatientCasesUseCaseTest {
     }
 
     @Test
-    void rejectsStudentAndProfessor() {
+    void allowsInternalRolesToListVisibleCases() {
         ListPatientCasesUseCase useCase = new ListPatientCasesUseCase(cases);
 
-        assertThrows(ForbiddenOperationException.class,
-                () -> useCase.execute(user(Role.RESEARCHER)));
-        assertThrows(ForbiddenOperationException.class,
-                () -> useCase.execute(user(Role.COORDINATOR)));
+        assertEquals(List.of(), useCase.execute(user(Role.RESEARCHER)));
+        assertEquals(List.of(), useCase.execute(user(Role.COORDINATOR)));
     }
 
     private static AuthenticatedUser patient(UUID id) {

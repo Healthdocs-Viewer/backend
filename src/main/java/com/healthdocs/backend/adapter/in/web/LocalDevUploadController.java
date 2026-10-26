@@ -1,8 +1,11 @@
 package com.healthdocs.backend.adapter.in.web;
 
 import com.healthdocs.backend.adapter.out.storage.LocalStorageAdapter;
+import com.healthdocs.backend.adapter.out.persistence.StoredFileRepository;
+import com.healthdocs.backend.adapter.out.persistence.entity.StoredFileEntity;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -15,15 +18,18 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.ContentDisposition;
 
 @RestController
 @Profile({"local", "dev", "test"})
 public class LocalDevUploadController {
 
     private final LocalStorageAdapter storage;
+    private final StoredFileRepository files;
 
-    public LocalDevUploadController(LocalStorageAdapter storage) {
+    public LocalDevUploadController(LocalStorageAdapter storage, StoredFileRepository files) {
         this.storage = storage;
+        this.files = files;
     }
 
     @PutMapping("/api/v1/dev/uploads/{*objectKey}")
@@ -50,14 +56,18 @@ public class LocalDevUploadController {
         String normalizedKey = objectKey.startsWith("/") ? objectKey.substring(1) : objectKey;
         byte[] bytes = storage.readObject(normalizedKey, token);
         if (bytes == null) return ResponseEntity.notFound().build();
-        String filename = normalizedKey.substring(normalizedKey.lastIndexOf('/') + 1);
-        String contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
-        if (filename.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) {
-            contentType = MediaType.APPLICATION_PDF_VALUE;
-        }
+        StoredFileEntity metadata = files.findByObjectKey(normalizedKey).orElse(null);
+        String filename = metadata == null
+                ? normalizedKey.substring(normalizedKey.lastIndexOf('/') + 1)
+                : metadata.getOriginalFilename();
+        String contentType = metadata == null || metadata.getContentType() == null
+                ? MediaType.APPLICATION_OCTET_STREAM_VALUE
+                : metadata.getContentType();
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename(filename, StandardCharsets.UTF_8).build().toString())
+                .header("X-Content-Type-Options", "nosniff")
                 .body(new ByteArrayResource(bytes));
     }
 }

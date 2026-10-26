@@ -11,6 +11,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -35,6 +36,21 @@ public class MedicalCaseEntity {
 
     @Column(name = "study_name", nullable = false, length = 255)
     private String studyName;
+
+    @Column(name = "additional_reference", length = 100)
+    private String additionalReference;
+
+    @Column(name = "origin_institution", length = 200)
+    private String originInstitution;
+
+    @Column(name = "study_date")
+    private LocalDate studyDate;
+
+    @Column(length = 500)
+    private String notes;
+
+    @Column(name = "received_at")
+    private Instant receivedAt;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -68,6 +84,12 @@ public class MedicalCaseEntity {
     }
 
     public void setStatus(CaseStatus status) {
+        if (status == null) {
+            throw new IllegalArgumentException("Case status is required");
+        }
+        if (this.status != null && this.status != status && !this.status.canTransitionTo(status)) {
+            throw new IllegalStateException("Invalid case status transition: " + this.status + " -> " + status);
+        }
         this.status = status;
     }
 
@@ -78,6 +100,20 @@ public class MedicalCaseEntity {
     public String getStudyName() {
         return studyName;
     }
+
+    public String getAdditionalReference() { return additionalReference; }
+    public String getOriginInstitution() { return originInstitution; }
+    public LocalDate getStudyDate() { return studyDate; }
+    public String getNotes() { return notes; }
+    public void setCaseDetails(String additionalReference, String originInstitution, LocalDate studyDate, String notes) {
+        this.additionalReference = additionalReference;
+        this.originInstitution = originInstitution;
+        this.studyDate = studyDate;
+        this.notes = notes;
+    }
+
+    public Instant getReceivedAt() { return receivedAt; }
+    public void setReceivedAt(Instant value) { receivedAt = value; }
 
     public Instant getCreatedAt() {
         return createdAt;

@@ -6,6 +6,7 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -33,6 +34,8 @@ public class SecurityConfig {
                         // Las URLs locales de storage llevan su propio token temporal.
                         // Se abren en una pestaña nueva, por lo que no reciben el Bearer del frontend.
                         .requestMatchers("/api/v1/dev/uploads/**", "/api/v1/dev/downloads/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/cases").hasAnyRole("PATIENT", "RESEARCHER", "COORDINATOR")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/cases").hasAnyRole("PATIENT", "RESEARCHER", "COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/cases/**").hasRole("PATIENT")
                         .requestMatchers("/api/v1/internal/**").hasAnyRole("RESEARCHER", "COORDINATOR")
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
@@ -54,7 +57,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(List.of(
                 "http://localhost:3000",
                 "http://localhost:4173"));
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "OPTIONS"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
         configuration.setMaxAge(3600L);
 

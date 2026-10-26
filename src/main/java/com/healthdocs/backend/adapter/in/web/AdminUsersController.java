@@ -27,7 +27,7 @@ public class AdminUsersController {
     }
 
     @PutMapping("/{userId}/role")
-    @PreAuthorize("hasRole('ADMIN') and hasAuthority('ACCOUNT_ENABLED')")
+    @PreAuthorize("hasAnyRole('ADMIN','COORDINATOR') and hasAuthority('ACCOUNT_ENABLED')")
     public ResponseEntity<ChangeUserRoleUseCase.UserRoleView> changeRole(
             @AuthenticationPrincipal AuthenticatedUser administrator,
             @PathVariable UUID userId,

@@ -58,7 +58,7 @@ public class LocalStorageAdapter implements StoragePort {
 
     @Override
     public boolean objectExists(String objectKey) {
-        return knownObjects.contains(objectKey);
+        return knownObjects.contains(objectKey) || Files.isRegularFile(safePath(objectKey));
     }
 
     public void markObjectStored(String objectKey) {

@@ -10,6 +10,6 @@ class TestProfileStartupTest {
 
     @Test
     void startsWithTheIsolatedTestProfile() {
-        // The context start verifies Flyway, the H2 profile and provider validation.
+        // The context start verifies PostgreSQL migrations and provider validation.
     }
 }

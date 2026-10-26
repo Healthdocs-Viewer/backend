@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class OperationsFlowAuthorizationTest {
+
     @Autowired
     private MockMvc mockMvc;
 

@@ -89,6 +89,11 @@ public class SqsResultNotificationPublisher implements ResultNotificationPublish
                 "SQS publication did not complete");
     }
 
+    @Override
+    public boolean isDeliveryEnabled() {
+        return true;
+    }
+
     String serialize(ResultAvailableEvent event) {
         try {
             return objectMapper.writeValueAsString(Message.from(event));
@@ -159,7 +164,7 @@ public class SqsResultNotificationPublisher implements ResultNotificationPublish
             return new Message(event.eventVersion(), event.eventType(), event.eventId().toString(),
                     event.resultId().toString(), event.caseId().toString(), event.patientId().toString(),
                     event.patientEmail(), event.availableAt().toString(), event.eventTimestamp().toString(),
-                    event.publishedBy().toString());
+                    event.publishedBy() == null ? null : event.publishedBy().toString());
         }
     }
 }

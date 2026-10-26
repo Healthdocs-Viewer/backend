@@ -35,6 +35,10 @@ public class CaseAssignmentEntity {
         this.userId = userId;
     }
 
+    public UUID getCaseId() { return caseId; }
+    public UUID getUserId() { return userId; }
+    public Instant getAssignedAt() { return assignedAt; }
+
     public static class AssignmentId implements Serializable {
         private UUID caseId;
         private UUID userId;

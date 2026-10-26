@@ -1,8 +1,11 @@
 package com.healthdocs.backend.adapter.out.persistence.entity;
 
 import com.healthdocs.backend.domain.model.Role;
+import com.healthdocs.backend.domain.model.ResearcherAuthorizationStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 import com.healthdocs.backend.adapter.out.persistence.RoleConverter;
 import jakarta.persistence.Convert;
 import jakarta.persistence.GeneratedValue;
@@ -37,6 +40,16 @@ public class AppUserEntity {
     @Column(nullable = false)
     private boolean enabled;
 
+    @Column(name = "full_name", length = 200)
+    private String fullName;
+
+    @Column(name = "researcher_code", length = 50, unique = true)
+    private String researcherCode;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "authorization_status", length = 20)
+    private ResearcherAuthorizationStatus authorizationStatus;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -49,6 +62,8 @@ public class AppUserEntity {
         this.email = email;
         this.role = role;
         this.enabled = true;
+        this.authorizationStatus = role == Role.RESEARCHER
+                ? ResearcherAuthorizationStatus.AUTHORIZED : null;
     }
 
     public UUID getId() {
@@ -71,7 +86,39 @@ public class AppUserEntity {
         if (role == null) {
             throw new IllegalArgumentException("Role is required");
         }
+        Role previousRole = this.role;
         this.role = role;
+        if (role == Role.RESEARCHER) {
+            if (previousRole != Role.RESEARCHER || authorizationStatus == null) {
+                authorizationStatus = ResearcherAuthorizationStatus.AUTHORIZED;
+            }
+        } else {
+            authorizationStatus = null;
+        }
+    }
+
+    public String getFullName() { return fullName; }
+    public String getResearcherCode() { return researcherCode; }
+    public ResearcherAuthorizationStatus getAuthorizationStatus() { return authorizationStatus; }
+
+    public void updateResearcherProfile(String fullName, String researcherCode) {
+        if (fullName == null || fullName.isBlank() || researcherCode == null || researcherCode.isBlank()) {
+            throw new IllegalArgumentException("Full name and researcher code are required");
+        }
+        String normalizedName = fullName.trim();
+        String normalizedCode = researcherCode.trim().toUpperCase(java.util.Locale.ROOT);
+        if (normalizedName.length() > 200 || normalizedCode.length() > 50) {
+            throw new IllegalArgumentException("Researcher profile fields exceed their maximum length");
+        }
+        this.fullName = normalizedName;
+        this.researcherCode = normalizedCode;
+    }
+
+    public void changeAuthorizationStatus(ResearcherAuthorizationStatus status) {
+        if (role != Role.RESEARCHER || status == null) {
+            throw new IllegalArgumentException("Authorization can only be changed for researchers");
+        }
+        authorizationStatus = status;
     }
 
     public String getPasswordHash() {

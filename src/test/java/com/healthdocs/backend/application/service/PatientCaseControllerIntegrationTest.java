@@ -2,12 +2,14 @@ package com.healthdocs.backend.application.service;
 
 import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.healthdocs.backend.adapter.out.storage.LocalStorageAdapter;
@@ -57,7 +59,7 @@ class PatientCaseControllerIntegrationTest {
     private GenerateUploadUrlUseCase generateUploadUrl;
 
     @MockBean
-    private ConfirmFileUploadUseCase confirmFileUpload;
+    private CompleteUploadUseCase completeUpload;
 
     @MockBean
     private ListPatientCasesUseCase listPatientCases;
@@ -66,15 +68,19 @@ class PatientCaseControllerIntegrationTest {
     void listsCasesForAuthenticatedPatient() throws Exception {
         UUID patientId = UUID.randomUUID();
         UUID caseId = UUID.randomUUID();
-        when(listPatientCases.execute(any())).thenReturn(List.of(
-                new ListPatientCasesUseCase.CaseView(
-                        caseId, "CAS-001", "TAC", CaseStatus.CREATED, NOW)));
+        when(listPatientCases.execute(any(), any(), any(), any(), anyInt(), anyInt())).thenReturn(
+                new ListPatientCasesUseCase.Response(
+                        List.of(new ListPatientCasesUseCase.CaseView(
+                                caseId, "CAS-001", "TAC", CaseStatus.CONSENT_PENDING, NOW, NOW, null)),
+                        0, 10, 1, 1,
+                        new ListPatientCasesUseCase.StatusCounts(1, 1, 0, 0),
+                        new ListPatientCasesUseCase.AppliedFilters("", "ALL", "createdAt:desc")));
 
         mockMvc.perform(get("/api/v1/cases")
                         .with(authentication(patientAuth(patientId))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(caseId.toString()))
-                .andExpect(jsonPath("$[0].referenceCode").value("CAS-001"));
+                .andExpect(jsonPath("$.items[0].id").value(caseId.toString()))
+                .andExpect(jsonPath("$.items[0].referenceCode").value("CAS-001"));
     }
 
     @Test
@@ -84,37 +90,58 @@ class PatientCaseControllerIntegrationTest {
     }
 
     @Test
-    void rejectsInternalRolesFromCaseList() throws Exception {
+    void allowsInternalRolesToListOwnCases() throws Exception {
         mockMvc.perform(get("/api/v1/cases")
                         .with(authentication(authenticatedUser(UUID.randomUUID(), Role.RESEARCHER))))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/cases")
                         .with(authentication(authenticatedUser(UUID.randomUUID(), Role.COORDINATOR))))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isOk());
     }
 
     @Test
     void createsCaseWithPatientAuthentication() throws Exception {
         UUID patientId = UUID.randomUUID();
         UUID caseId = UUID.randomUUID();
-        when(createCase.execute(any())).thenReturn(new MedicalCase(
+        UUID idempotencyKey = UUID.randomUUID();
+        when(createCase.executeIdempotent(any())).thenReturn(new CreateCaseUseCase.CreationResult(new MedicalCase(
                 caseId,
                 patientId,
                 "CAS-20260915-0001",
                 "Radiografía de tórax",
-                CaseStatus.CREATED,
+                CaseStatus.CONSENT_PENDING,
                 NOW,
-                NOW));
+                NOW), false));
 
         mockMvc.perform(post("/api/v1/cases")
                         .with(authentication(patientAuth(patientId)))
+                        .header("Idempotency-Key", idempotencyKey)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"studyName\":\"Radiografía de tórax\"}"))
+                        .content("{\"studyName\":\"Radiografía de tórax\",\"originInstitution\":\"Centro de prueba\",\"studyDate\":\"2026-09-15\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(caseId.toString()))
                 .andExpect(jsonPath("$.referenceCode").value("CAS-20260915-0001"))
-                .andExpect(jsonPath("$.status").value("CREATED"))
-                .andExpect(jsonPath("$.studyName").value("Radiografía de tórax"));
+                .andExpect(jsonPath("$.status").value("CONSENT_PENDING"))
+                .andExpect(jsonPath("$.studyName").value("Radiografía de tórax"))
+                .andExpect(header().string("Idempotency-Replayed", "false"));
+    }
+
+    @Test
+    void idempotentRetryReturnsOkAndMarksReplay() throws Exception {
+        UUID patientId = UUID.randomUUID();
+        UUID caseId = UUID.randomUUID();
+        when(createCase.executeIdempotent(any())).thenReturn(new CreateCaseUseCase.CreationResult(new MedicalCase(
+                caseId, patientId, "CAS-20260915-0001", "Radiografía de tórax",
+                CaseStatus.CONSENT_PENDING, NOW, NOW), true));
+
+        mockMvc.perform(post("/api/v1/cases")
+                        .with(authentication(patientAuth(patientId)))
+                        .header("Idempotency-Key", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"studyName\":\"Radiografía de tórax\",\"originInstitution\":\"Centro de prueba\",\"studyDate\":\"2026-09-15\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(caseId.toString()))
+                .andExpect(header().string("Idempotency-Replayed", "true"));
     }
 
     @Test
@@ -172,10 +199,11 @@ class PatientCaseControllerIntegrationTest {
     @Test
     void confirmsUpload() throws Exception {
         UUID patientId = UUID.randomUUID();
-        UUID caseId = UUID.randomUUID();
         UUID fileId = UUID.randomUUID();
-        when(confirmFileUpload.execute(any())).thenReturn(new StoredFile(
-                fileId, caseId, "input/key", FileKind.INPUT, "rx.dcm", "application/dicom", 1024L, NOW, NOW));
+        when(completeUpload.execute(any(), any())).thenReturn(new CompleteUploadUseCase.Completion(
+                new InternalFlowService.FileView(fileId, "rx.dcm", "application/dicom", 1024L, FileKind.INPUT),
+                null,
+                CaseStatus.CONFIRMATION_PENDING));
 
         mockMvc.perform(post("/api/v1/files/{fileId}/complete", fileId)
                         .with(authentication(patientAuth(patientId))))
@@ -186,7 +214,7 @@ class PatientCaseControllerIntegrationTest {
 
     @Test
     void mapsNotFoundToContractError() throws Exception {
-        when(confirmFileUpload.execute(any())).thenThrow(new ResourceNotFoundException("File not found"));
+        when(completeUpload.execute(any(), any())).thenThrow(new ResourceNotFoundException("File not found"));
 
         mockMvc.perform(post("/api/v1/files/{fileId}/complete", UUID.randomUUID())
                         .with(authentication(patientAuth(UUID.randomUUID()))))
@@ -196,12 +224,18 @@ class PatientCaseControllerIntegrationTest {
     }
 
     @Test
-    void rejectsNonPatientRoleByPreAuthorize() throws Exception {
+    void allowsResearcherRoleToCreateCase() throws Exception {
+        UUID researcherId = UUID.randomUUID();
+        when(createCase.executeIdempotent(any())).thenReturn(new CreateCaseUseCase.CreationResult(new MedicalCase(
+                UUID.randomUUID(), researcherId, "CAS-20260915-0002", "Radiografía de tórax",
+                CaseStatus.CONSENT_PENDING, NOW, NOW), false));
+
         mockMvc.perform(post("/api/v1/cases")
-                        .with(authentication(authenticatedUser(UUID.randomUUID(), Role.RESEARCHER)))
+                        .with(authentication(authenticatedUser(researcherId, Role.RESEARCHER)))
+                        .header("Idempotency-Key", UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"studyName\":\"Radiografía de tórax\"}"))
-                .andExpect(status().isForbidden());
+                        .content("{\"studyName\":\"Radiografía de tórax\",\"originInstitution\":\"Centro de prueba\",\"studyDate\":\"2026-09-15\"}"))
+                .andExpect(status().isCreated());
     }
 
     @Test

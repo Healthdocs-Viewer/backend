@@ -61,7 +61,7 @@ class JpaCaseRepositoryAdapterIntegrationTest {
                 patient.getId(),
                 "CAS-20260916-0001",
                 "Radiografía de tórax",
-                CaseStatus.CREATED,
+                CaseStatus.CONSENT_PENDING,
                 now,
                 now));
 
@@ -86,7 +86,7 @@ class JpaCaseRepositoryAdapterIntegrationTest {
         UUID caseId = UUID.randomUUID();
         Instant now = Instant.parse("2026-09-16T00:00:00Z");
         caseRepository.saveCase(new MedicalCase(
-                caseId, patient.getId(), "CAS-20260916-0002", "MRI", CaseStatus.CREATED, now, now));
+                caseId, patient.getId(), "CAS-20260916-0002", "MRI", CaseStatus.CONSENT_PENDING, now, now));
 
         identityLinking.linkVerifiedIdentity(patient.getId(), "supabase", "https://issuer.test", "new-subject");
 

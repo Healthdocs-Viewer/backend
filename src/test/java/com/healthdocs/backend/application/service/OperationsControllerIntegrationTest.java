@@ -102,9 +102,9 @@ class OperationsControllerIntegrationTest {
         StoredFileEntity inputFile = files.save(new StoredFileEntity(
                 UUID.randomUUID(), eligibleCase, "input/key/rx.dcm", FileKind.INPUT, "rx.dcm", "application/dicom", 1024L));
 
-        // Case 2: CREATED with no files -> Should NOT be returned
+        // Case 2: CONSENT_PENDING with no files -> Should NOT be returned
         cases.save(new MedicalCaseEntity(
-                UUID.randomUUID(), patient, CaseStatus.CREATED, "CAS-CREATED-002", "TAC_CRANEO"));
+                UUID.randomUUID(), patient, CaseStatus.CONSENT_PENDING, "CAS-CREATED-002", "TAC_CRANEO"));
 
         // Case 3: FILES_RECEIVED with NO files -> Should NOT be returned
         cases.save(new MedicalCaseEntity(

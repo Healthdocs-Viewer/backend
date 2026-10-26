@@ -14,6 +14,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
+import java.time.Instant;
 
 /** Creates the Healthdocs account for an already authenticated external identity. */
 @Service
@@ -24,6 +26,7 @@ public class RegisterAuthenticatedUserUseCase {
     private final AuthIdentityRepository identities;
     private final AuthRegistrationLock registrationLock;
     private final ExternalIdentityTokenVerifier tokenVerifier;
+    private com.healthdocs.backend.application.port.out.SecurityAuditEventPort securityAudit;
 
     public RegisterAuthenticatedUserUseCase(
             AppUserRepository users,
@@ -34,6 +37,12 @@ public class RegisterAuthenticatedUserUseCase {
         this.identities = identities;
         this.registrationLock = registrationLock;
         this.tokenVerifier = tokenVerifier;
+    }
+
+    @Autowired
+    public void setSecurityAuditEventPort(
+            com.healthdocs.backend.application.port.out.SecurityAuditEventPort securityAudit) {
+        this.securityAudit = securityAudit;
     }
 
     @Transactional
@@ -73,6 +82,12 @@ public class RegisterAuthenticatedUserUseCase {
                     user, identity.provider(), identity.issuer(), identity.subject()));
         } catch (DataIntegrityViolationException exception) {
             throw new BusinessRuleViolationException("This identity or email is already registered");
+        }
+
+        if (securityAudit != null) {
+            Instant createdAt = user.getCreatedAt() == null ? Instant.now() : user.getCreatedAt();
+            securityAudit.record("ACCOUNT_CREATED", createdAt, null, user.getId(), null,
+                    null, null, null, null, null, null, "ACCOUNT_CREATED:" + user.getId());
         }
 
         return view(user);

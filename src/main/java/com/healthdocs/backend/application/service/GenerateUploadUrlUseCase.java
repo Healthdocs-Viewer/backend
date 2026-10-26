@@ -29,22 +29,33 @@ public class GenerateUploadUrlUseCase {
 
     @Transactional
     public Result execute(Command command) {
-        AcceptTermsUseCase.requirePatient(command.patientId(), command.role(), command.enabled());
+        AcceptTermsUseCase.requireEnabledCaseActor(command.patientId(), command.role(), command.enabled());
         String originalFilename = requireText(command.originalFilename(), "originalFilename");
         String contentType = requireText(command.contentType(), "contentType");
         if (command.sizeBytes() != null && command.sizeBytes() < 1) {
             throw new IllegalArgumentException("sizeBytes must be positive");
         }
-        MedicalCase medicalCase = cases.findCaseById(command.caseId())
+        MedicalCase medicalCase = cases.findCaseByIdForUpdate(command.caseId())
                 .orElseThrow(() -> new ResourceNotFoundException("Case not found"));
         AcceptTermsUseCase.requireOwnership(medicalCase, command.patientId());
+        if (medicalCase.status() != com.healthdocs.backend.domain.model.CaseStatus.FILE_PENDING
+                && medicalCase.status() != com.healthdocs.backend.domain.model.CaseStatus.CONFIRMATION_PENDING) {
+            throw new BusinessRuleViolationException("Case is not waiting for an input file");
+        }
         if (!cases.hasAnyConsent(command.caseId())) {
             throw new BusinessRuleViolationException("Consent is required before requesting an upload URL");
+        }
+        Instant now = clock.instant();
+        if (cases.findActiveInputUploadIntent(command.caseId(), now).isPresent()) {
+            throw new BusinessRuleViolationException("An input upload intent is already active for this case");
         }
 
         UUID fileId = UUID.randomUUID();
         String objectKey = "input/%s/%s/%s".formatted(command.caseId(), fileId, sanitizeFilename(originalFilename));
-        Instant now = clock.instant();
+        StoragePort.UploadUrlResult uploadUrl = storage.generateUploadUrl(objectKey, contentType, UPLOAD_TTL_MINUTES);
+        if (uploadUrl.expiresAt() == null || !now.isBefore(uploadUrl.expiresAt())) {
+            throw new IllegalStateException("Storage provider returned an invalid upload URL expiration");
+        }
         StoredFile file = new StoredFile(
                 fileId,
                 command.caseId(),
@@ -54,9 +65,10 @@ public class GenerateUploadUrlUseCase {
                 contentType,
                 command.sizeBytes(),
                 now,
-                now);
+                now,
+                command.patientId(),
+                uploadUrl.expiresAt());
         StoredFile saved = cases.saveFile(file);
-        StoragePort.UploadUrlResult uploadUrl = storage.generateUploadUrl(objectKey, contentType, UPLOAD_TTL_MINUTES);
         return new Result(saved, uploadUrl.uploadUrl(), uploadUrl.expiresAt());
     }
 

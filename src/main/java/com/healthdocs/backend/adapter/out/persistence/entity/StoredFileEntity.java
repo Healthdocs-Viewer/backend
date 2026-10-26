@@ -50,6 +50,18 @@ public class StoredFileEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "confirmed_at")
+    private Instant confirmedAt;
+
+    @Column(name = "upload_initiated_by")
+    private UUID uploadInitiatedBy;
+
+    @Column(name = "upload_expires_at")
+    private Instant uploadExpiresAt;
+
+    @Column(name = "input_active", nullable = false)
+    private boolean inputActive = true;
+
     protected StoredFileEntity() {
     }
 
@@ -61,6 +73,18 @@ public class StoredFileEntity {
             String originalFilename,
             String contentType,
             Long sizeBytes) {
+        this(id, medicalCase, objectKey, fileKind, originalFilename, contentType, sizeBytes, null);
+    }
+
+    public StoredFileEntity(
+            UUID id,
+            MedicalCaseEntity medicalCase,
+            String objectKey,
+            FileKind fileKind,
+            String originalFilename,
+            String contentType,
+            Long sizeBytes,
+            UUID uploadInitiatedBy) {
         this.id = id;
         this.medicalCase = medicalCase;
         this.objectKey = objectKey;
@@ -68,6 +92,7 @@ public class StoredFileEntity {
         this.originalFilename = originalFilename;
         this.contentType = contentType;
         this.sizeBytes = sizeBytes;
+        this.uploadInitiatedBy = uploadInitiatedBy;
     }
 
     public UUID getId() {
@@ -105,6 +130,16 @@ public class StoredFileEntity {
     public Instant getUpdatedAt() {
         return updatedAt;
     }
+
+    public Instant getConfirmedAt() { return confirmedAt; }
+    public void confirm(Instant at) { if (confirmedAt == null) confirmedAt = at; }
+    public UUID getUploadInitiatedBy() { return uploadInitiatedBy; }
+    public void setUploadInitiatedBy(UUID userId) { uploadInitiatedBy = userId; }
+    public Instant getUploadExpiresAt() { return uploadExpiresAt; }
+    public void setUploadExpiresAt(Instant expiresAt) { uploadExpiresAt = expiresAt; }
+    public boolean isInputActive() { return inputActive; }
+    public void stageInput() { inputActive = false; }
+    public void activateInput() { inputActive = true; }
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;

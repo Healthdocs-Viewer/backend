@@ -13,8 +13,12 @@ public class StoredFile {
     private final String originalFilename;
     private final String contentType;
     private final Long sizeBytes;
+    private final UUID uploadInitiatedBy;
+    private final Instant uploadExpiresAt;
+    private final boolean inputActive;
     private final Instant createdAt;
     private Instant updatedAt;
+    private Instant confirmedAt;
 
     public StoredFile(
             UUID id,
@@ -26,6 +30,54 @@ public class StoredFile {
             Long sizeBytes,
             Instant createdAt,
             Instant updatedAt) {
+        this(id, caseId, objectKey, fileKind, originalFilename, contentType, sizeBytes,
+                createdAt, updatedAt, null);
+    }
+
+    public StoredFile(
+            UUID id,
+            UUID caseId,
+            String objectKey,
+            FileKind fileKind,
+            String originalFilename,
+            String contentType,
+            Long sizeBytes,
+            Instant createdAt,
+            Instant updatedAt,
+            UUID uploadInitiatedBy) {
+        this(id, caseId, objectKey, fileKind, originalFilename, contentType, sizeBytes,
+                createdAt, updatedAt, uploadInitiatedBy, null);
+    }
+
+    public StoredFile(
+            UUID id,
+            UUID caseId,
+            String objectKey,
+            FileKind fileKind,
+            String originalFilename,
+            String contentType,
+            Long sizeBytes,
+            Instant createdAt,
+            Instant updatedAt,
+            UUID uploadInitiatedBy,
+            Instant uploadExpiresAt) {
+        this(id, caseId, objectKey, fileKind, originalFilename, contentType, sizeBytes,
+                createdAt, updatedAt, uploadInitiatedBy, uploadExpiresAt, true);
+    }
+
+    public StoredFile(
+            UUID id,
+            UUID caseId,
+            String objectKey,
+            FileKind fileKind,
+            String originalFilename,
+            String contentType,
+            Long sizeBytes,
+            Instant createdAt,
+            Instant updatedAt,
+            UUID uploadInitiatedBy,
+            Instant uploadExpiresAt,
+            boolean inputActive) {
         this.id = Objects.requireNonNull(id, "id is required");
         this.caseId = Objects.requireNonNull(caseId, "caseId is required");
         this.objectKey = requireText(objectKey, "objectKey");
@@ -36,13 +88,20 @@ public class StoredFile {
             throw new IllegalArgumentException("sizeBytes must be positive");
         }
         this.sizeBytes = sizeBytes;
+        this.uploadInitiatedBy = uploadInitiatedBy;
+        this.uploadExpiresAt = uploadExpiresAt;
+        this.inputActive = inputActive;
         this.createdAt = Objects.requireNonNull(createdAt, "createdAt is required");
         this.updatedAt = Objects.requireNonNull(updatedAt, "updatedAt is required");
     }
 
     public void markConfirmed(Instant now) {
-        this.updatedAt = Objects.requireNonNull(now, "now is required");
+        if (confirmedAt != null) return;
+        confirmedAt = Objects.requireNonNull(now, "now is required");
+        this.updatedAt = now;
     }
+
+    public void restoreConfirmation(Instant at) { confirmedAt = at; }
 
     public UUID id() {
         return id;
@@ -72,6 +131,10 @@ public class StoredFile {
         return sizeBytes;
     }
 
+    public UUID uploadInitiatedBy() { return uploadInitiatedBy; }
+    public Instant uploadExpiresAt() { return uploadExpiresAt; }
+    public boolean inputActive() { return inputActive; }
+
     public Instant createdAt() {
         return createdAt;
     }
@@ -79,6 +142,9 @@ public class StoredFile {
     public Instant updatedAt() {
         return updatedAt;
     }
+
+    public Instant confirmedAt() { return confirmedAt; }
+    public boolean confirmed() { return confirmedAt != null; }
 
     private static String requireText(String value, String field) {
         if (value == null || value.isBlank()) {

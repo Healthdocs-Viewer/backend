@@ -1,8 +1,10 @@
 package com.healthdocs.backend.application.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import com.healthdocs.backend.application.port.out.CaseRepositoryPort;
 import com.healthdocs.backend.application.port.out.StoragePort;
@@ -51,19 +53,55 @@ class PatientFlowUseCasesTest {
         UUID patientId = UUID.randomUUID();
 
         MedicalCase medicalCase = createCase.execute(
-                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "RADIOGRAFIA_TORAX"));
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "RADIOGRAFIA_TORAX", null, "Centro de prueba", LocalDate.of(2026, 9, 15), null));
 
         assertEquals(patientId, medicalCase.patientId());
         assertEquals("CAS-20260915-0001", medicalCase.referenceCode());
-        assertEquals("Radiografía de tórax", medicalCase.studyName());
-        assertEquals(CaseStatus.CREATED, medicalCase.status());
+        assertEquals("RADIOGRAFIA_TORAX", medicalCase.studyName());
+        assertEquals(CaseStatus.CONSENT_PENDING, medicalCase.status());
+    }
+
+    @Test
+    void retriesWithSameKeyAndPayloadReturnTheSameCase() {
+        UUID patientId = UUID.randomUUID();
+        UUID key = UUID.randomUUID();
+        CreateCaseUseCase.Command command = new CreateCaseUseCase.Command(patientId, Role.PATIENT, true,
+                "Radiografía de tórax", null, "Centro de prueba", LocalDate.of(2026, 9, 15), null, key);
+
+        CreateCaseUseCase.CreationResult first = createCase.executeIdempotent(command);
+        CreateCaseUseCase.CreationResult retry = createCase.executeIdempotent(command);
+
+        assertEquals(first.medicalCase().id(), retry.medicalCase().id());
+        assertEquals(false, first.replayed());
+        assertEquals(true, retry.replayed());
+        assertEquals(1, cases.findAllByPatientId(patientId).size());
+    }
+
+    @Test
+    void sameKeyWithDifferentPayloadConflictsButNewKeyAllowsSameStudy() {
+        UUID patientId = UUID.randomUUID();
+        UUID key = UUID.randomUUID();
+        CreateCaseUseCase.Command first = new CreateCaseUseCase.Command(patientId, Role.PATIENT, true,
+                "Radiografía de tórax", null, "Centro de prueba", LocalDate.of(2026, 9, 15), null, key);
+        MedicalCase created = createCase.executeIdempotent(first).medicalCase();
+
+        assertThrows(BusinessRuleViolationException.class, () -> createCase.executeIdempotent(
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Otro estudio", null,
+                        "Centro de prueba", LocalDate.of(2026, 9, 15), null, key)));
+        MedicalCase legitimateSecondCase = createCase.executeIdempotent(
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax", null,
+                        "Centro de prueba", LocalDate.of(2026, 9, 15), null, UUID.randomUUID())).medicalCase();
+
+        assertNotEquals(created.id(), legitimateSecondCase.id());
+        assertNotEquals(created.referenceCode(), legitimateSecondCase.referenceCode());
+        assertEquals(2, cases.findAllByPatientId(patientId).size());
     }
 
     @Test
     void acceptsTermsOnlyForOwnedCases() {
         UUID ownerId = UUID.randomUUID();
         MedicalCase medicalCase = createCase.execute(
-                new CreateCaseUseCase.Command(ownerId, Role.PATIENT, true, "Radiografía de tórax"));
+                new CreateCaseUseCase.Command(ownerId, Role.PATIENT, true, "Radiografía de tórax", null, "Centro de prueba", LocalDate.of(2026, 9, 15), null));
 
         CaseConsent consent = acceptTerms.execute(
                 new AcceptTermsUseCase.Command(ownerId, Role.PATIENT, true, medicalCase.id(), "1.0"));
@@ -79,7 +117,7 @@ class PatientFlowUseCasesTest {
     void requiresConsentBeforeGeneratingUploadUrl() {
         UUID patientId = UUID.randomUUID();
         MedicalCase medicalCase = createCase.execute(
-                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax"));
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax", null, "Centro de prueba", LocalDate.of(2026, 9, 15), null));
 
         assertThrows(
                 BusinessRuleViolationException.class,
@@ -97,7 +135,7 @@ class PatientFlowUseCasesTest {
     void generatesUploadAndConfirmTransitionsCaseWhenObjectExists() {
         UUID patientId = UUID.randomUUID();
         MedicalCase medicalCase = createCase.execute(
-                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax"));
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax", null, "Centro de prueba", LocalDate.of(2026, 9, 15), null));
         acceptTerms.execute(new AcceptTermsUseCase.Command(patientId, Role.PATIENT, true, medicalCase.id(), "1.0"));
 
         GenerateUploadUrlUseCase.Result upload = generateUploadUrl.execute(
@@ -116,14 +154,40 @@ class PatientFlowUseCasesTest {
 
         assertEquals(upload.file().id(), confirmed.id());
         assertTrue(confirmed.objectKey().endsWith("_radiografia.dcm"));
-        assertEquals(CaseStatus.FILES_RECEIVED, cases.findCaseById(medicalCase.id()).orElseThrow().status());
+        assertEquals(CaseStatus.CONFIRMATION_PENDING, cases.findCaseById(medicalCase.id()).orElseThrow().status());
+    }
+
+    @Test
+    void confirmationRetriesAreIdempotentAndUnconfirmedIntentsStayUnconfirmed() {
+        UUID patientId = UUID.randomUUID();
+        MedicalCase medicalCase = createCase.execute(
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax", null, "Centro de prueba", LocalDate.of(2026, 9, 15), null));
+        acceptTerms.execute(new AcceptTermsUseCase.Command(patientId, Role.PATIENT, true, medicalCase.id(), "1.0"));
+        GenerateUploadUrlUseCase.Result first = generateUploadUrl.execute(new GenerateUploadUrlUseCase.Command(
+                patientId, Role.PATIENT, true, medicalCase.id(), "first.dcm", "application/dicom", 100L));
+        GenerateUploadUrlUseCase.Result retryIntent = generateUploadUrl.execute(new GenerateUploadUrlUseCase.Command(
+                patientId, Role.PATIENT, true, medicalCase.id(), "retry.dcm", "application/dicom", 100L));
+        storage.put(first.file().objectKey());
+
+        StoredFile confirmed = confirmFileUpload.execute(new ConfirmFileUploadUseCase.Command(
+                patientId, Role.PATIENT, true, first.file().id()));
+        Instant receivedAt = cases.findCaseById(medicalCase.id()).orElseThrow().receivedAt();
+        StoredFile retried = confirmFileUpload.execute(new ConfirmFileUploadUseCase.Command(
+                patientId, Role.PATIENT, true, first.file().id()));
+
+        assertEquals(NOW, confirmed.confirmedAt());
+        assertEquals(confirmed.confirmedAt(), retried.confirmedAt());
+        assertEquals(receivedAt, cases.findCaseById(medicalCase.id()).orElseThrow().receivedAt());
+        assertNull(receivedAt);
+        assertEquals(CaseStatus.CONFIRMATION_PENDING, cases.findCaseById(medicalCase.id()).orElseThrow().status());
+        assertTrue(!cases.findFileById(retryIntent.file().id()).orElseThrow().confirmed());
     }
 
     @Test
     void patientCannotConfirmAnotherPatientsFile() {
         UUID patientId = UUID.randomUUID();
         MedicalCase medicalCase = createCase.execute(
-                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax"));
+                new CreateCaseUseCase.Command(patientId, Role.PATIENT, true, "Radiografía de tórax", null, "Centro de prueba", LocalDate.of(2026, 9, 15), null));
         acceptTerms.execute(new AcceptTermsUseCase.Command(patientId, Role.PATIENT, true, medicalCase.id(), "1.0"));
         GenerateUploadUrlUseCase.Result upload = generateUploadUrl.execute(
                 new GenerateUploadUrlUseCase.Command(
@@ -140,6 +204,7 @@ class PatientFlowUseCasesTest {
         private final Map<UUID, MedicalCase> cases = new HashMap<>();
         private final Map<UUID, StoredFile> files = new HashMap<>();
         private final Map<String, CaseConsent> consents = new HashMap<>();
+        private final Map<String, CaseCreationRequest> creationRequests = new HashMap<>();
 
         @Override
         public MedicalCase saveCase(MedicalCase medicalCase) {
@@ -158,6 +223,11 @@ class PatientFlowUseCasesTest {
         }
 
         @Override
+        public List<MedicalCase> findAllAssignedInternalCases(UUID userId, List<CaseStatus> statuses) {
+            return List.of();
+        }
+
+        @Override
         public boolean existsCaseByIdAndPatientId(UUID caseId, UUID patientId) {
             return findCaseById(caseId).map(c -> c.patientId().equals(patientId)).orElse(false);
         }
@@ -167,6 +237,16 @@ class PatientFlowUseCasesTest {
             return cases.values().stream()
                     .filter(c -> LocalDate.ofInstant(c.createdAt(), ZoneOffset.UTC).equals(date))
                     .count();
+        }
+
+        @Override
+        public Optional<CaseCreationRequest> findCaseCreationRequest(UUID patientId, UUID key) {
+            return Optional.ofNullable(creationRequests.get(patientId + ":" + key));
+        }
+
+        @Override
+        public void saveCaseCreationRequest(UUID patientId, UUID key, String requestHash, UUID caseId) {
+            creationRequests.put(patientId + ":" + key, new CaseCreationRequest(requestHash, caseId));
         }
 
         @Override
