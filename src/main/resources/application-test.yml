@@ -1,8 +1,9 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:healthdocs;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
-    username: sa
-    password:
+    url: jdbc:tc:postgresql:16-alpine:///healthdocs
+    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
+    username: test
+    password: test
   flyway:
     enabled: true
 
