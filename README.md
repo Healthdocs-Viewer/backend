@@ -1,113 +1,82 @@
 # Healthdocs Viewer — Backend
 
-API Spring Boot del MVP de Healthdocs Viewer. El backend maneja autorización, casos, metadatos de archivos, resultados y eventos de notificación. Los archivos grandes no atraviesan la API: en AWS se cargarán y descargarán directamente desde S3 mediante URLs prefirmadas.
+API del MVP de Healthdocs Viewer para gestionar el recorrido de un caso: creación, consentimiento, archivos de entrada, asignación a investigadores, resultados y seguimiento. Está desarrollada con Java 21, Spring Boot y PostgreSQL. Este documento describe **funciones presentes en el repositorio**, no un despliegue productivo.
 
-## Requisitos locales
+## Avance del producto
 
-- Java 21
-- Maven 3.6.3 o superior
-- Docker Desktop con Docker Compose
+| Área | Funcionalidad implementada |
+|---|---|
+| Acceso y permisos | Autenticación local para demostraciones; validación de tokens de Supabase mediante JWKS; roles de paciente, investigador, coordinador y administrador. Las consultas sensibles comprueban propiedad del caso o asignación. |
+| Casos de pacientes | Creación con clave de idempotencia y referencia generada por el servidor; metadatos del estudio; consentimiento; carga y consulta de archivos; envío del caso; listado, detalle y tablero del paciente. |
+| Trabajo académico | Directorio y autorización de investigadores; asignación de casos; vistas de coordinación e investigación; carga, revisión, publicación, corrección e historial de resultados. |
+| Cambios de archivos | Solicitudes del paciente para reemplazar archivos de entrada, con borrador, envío, aprobación o rechazo y limpieza programada de archivos abandonados. |
+| Seguimiento | Actividad del caso, auditoría de accesos y cambios sensibles, bandeja de notificaciones del paciente y preferencias de correo. |
+| Administración | Archivo de casos y recepción y decisión de solicitudes de eliminación de casos o archivos. **La eliminación física de datos todavía no está implementada.** |
 
-## Arranque local
+La API y sus respuestas están documentadas en el [contrato OpenAPI 0.9.0](openapi/openapi.yaml). El esquema de base de datos se versiona con migraciones Flyway; hay pruebas unitarias y de integración con PostgreSQL mediante Testcontainers.
 
-1. Copia `.env.example` como `.env` y ajusta los valores locales si es necesario.
-2. Ejecuta `docker compose --env-file .env up -d postgres`.
-3. Si modificaste las variables `DB_*`, expórtalas en la terminal antes de iniciar Spring Boot. Con los valores por defecto no es necesario hacerlo:
-   - PowerShell: `$env:DB_HOST="localhost"; $env:DB_PORT="5432"; $env:DB_NAME="healthdocs"; $env:DB_USER="healthdocs"; $env:DB_PASSWORD="change_me_for_local_development"`
-4. Ejecuta `mvn spring-boot:run`.
-5. Comprueba `http://localhost:8080/actuator/health` y `http://localhost:8080/api/v1/ping`.
+### Alcance pendiente para operación real
 
-Para ejecutar también el backend dentro de Compose: `docker compose --env-file .env --profile app up -d --build`.
-El storage local queda en el volumen `backend-storage` y no se publica como un directorio HTTP anónimo.
+- **Archivos:** la implementación actual usa almacenamiento local y enlaces temporales servidos por el backend. La integración de almacenamiento en S3 y sus URL prefirmadas sigue pendiente.
+- **Notificaciones externas:** la bandeja dentro de la aplicación y el registro persistente de entregas están implementados. Se puede habilitar la publicación de eventos a SQS; el envío final de correos requiere un consumidor o servicio externo.
+- **Retención:** existen solicitudes y decisiones auditables, pero aún no hay ejecución automática de borrado físico ni una política de retención productiva.
+- **Puesta en producción:** falta configurar y validar infraestructura, credenciales, almacenamiento, observabilidad e integración completa con el frontend en el entorno de destino. Las cuentas y los datos de demostración son solo para desarrollo.
 
-Para detener la base de datos, ejecuta `docker compose down`. Para eliminar también los datos locales, ejecuta `docker compose down -v`.
+## Recorrido disponible para una demostración
+
+1. Un paciente crea un caso con los datos del estudio. Una clave `Idempotency-Key` evita duplicados cuando se reintenta la solicitud.
+2. Acepta los términos, carga uno o varios archivos y envía el caso. Los enlaces de carga tienen vencimiento; la confirmación comprueba que el archivo exista.
+3. Coordinación consulta la cola de casos, gestiona asignaciones y autoriza investigadores.
+4. Un investigador asignado consulta los archivos y carga un resultado. Coordinación puede solicitar una corrección o publicarlo.
+5. El paciente consulta el resultado, la actividad y las notificaciones desde sus vistas. Las decisiones y accesos relevantes dejan registros de auditoría.
+
+El recorrido se puede probar localmente con cuentas y datos ficticios. No se deben cargar datos clínicos reales en el entorno de demostración.
+
+## Arquitectura y contrato
+
+- **API:** Spring Boot 3, con endpoints bajo `/api/v1` y autorización por rol y recurso.
+- **Datos:** PostgreSQL 16, JPA y migraciones Flyway. Hibernate valida el esquema; no crea tablas automáticamente.
+- **Diseño:** dominio, casos de uso y adaptadores HTTP, de persistencia, almacenamiento y notificaciones.
+- **Archivos:** el adaptador local guarda objetos fuera de la base de datos; PostgreSQL conserva sus metadatos y relaciones con los casos.
+- **Contrato compartido:** [`openapi/openapi.yaml`](openapi/openapi.yaml) es la referencia para integrar frontend y backend. La [guía de cambios del contrato](docs/api-contract-workflow.md) explica cómo coordinar actualizaciones.
+
+La autenticación local se limita a desarrollo. El proveedor Supabase valida firma, emisor, audiencia y expiración del token, y resuelve la identidad contra usuarios vinculados en la base de datos; no otorga roles a partir de un token sin ese vínculo. El [procedimiento de vinculación de identidades](docs/architecture/auth_identity_linking.md) documenta la migración aprobada de cuentas existentes. El adaptador de Cognito es todavía un marcador sin implementación funcional.
+
+## Ejecutar en local
+
+**Requisitos:** Java 21, Maven y Docker Desktop con Docker Compose.
+
+```powershell
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+docker compose --env-file .env up -d postgres
+mvn "-Dspring-boot.run.profiles=local" spring-boot:run
+```
+
+Ejecuta los comandos desde la carpeta `code/backend`. Con los valores de `.env.example`, PostgreSQL y la API quedan disponibles en `localhost:5432` y `localhost:8080`. Comprueba [`/actuator/health`](http://localhost:8080/actuator/health) y [`/api/v1/ping`](http://localhost:8080/api/v1/ping). Si cambias `DB_*` en `.env`, asegúrate de que esos valores estén disponibles para el proceso de Maven.
+
+Para iniciar también la API en Docker:
+
+```powershell
+docker compose --env-file .env --profile app up -d --build
+```
+
+El perfil local incorpora cuentas y usuarios ficticios; consulta [usuarios de demostración](docs/local_demo_users.md). Las credenciales de prueba viven en la configuración local y deben reemplazarse fuera de ese entorno. No publiques `.env`, tokens ni credenciales de AWS.
 
 ## Pruebas
 
-Las pruebas de integración que activan el perfil `test` usan Testcontainers para iniciar PostgreSQL 16 y ejecutar todas las migraciones Flyway sobre PostgreSQL. Para ejecutarlas, Docker Desktop debe estar iniciado y el motor Docker debe ser accesible desde la terminal:
+Las pruebas de integración levantan PostgreSQL 16 mediante Testcontainers y aplican las migraciones Flyway. Requieren acceso al motor de Docker.
 
 ```powershell
 docker version
 mvn test
 ```
 
-Para ejecutar solo las pruebas de arranque y persistencia JPA:
+Para una comprobación acotada del arranque y la persistencia:
 
 ```powershell
 mvn "-Dtest=TestProfileStartupTest,JpaCaseRepositoryAdapterIntegrationTest" test
 ```
 
-La primera ejecución puede tardar mientras Docker descarga las imágenes de PostgreSQL y Testcontainers y Spring inicia el contexto. Si `docker version` no puede conectar con el motor, Maven puede iniciar, pero las pruebas de integración fallarán al crear la base de datos. En Codex, el acceso al motor Docker depende de los permisos del entorno de ejecución y no se configura en este repositorio.
+## Integración de notificaciones
 
-## Estructura inicial
-
-```text
-src/main/java/com/healthdocs/backend/
-├── adapter/
-│   ├── in/web/          # Adaptadores de entrada HTTP
-│   └── out/persistence/ # Adaptadores de salida y entidades JPA
-├── application/
-│   ├── port/in/         # Casos de uso expuestos por la aplicación
-│   └── service/         # Implementación de casos de uso
-├── domain/model/        # Modelo y reglas de negocio
-└── infrastructure/      # Configuración técnica del framework
-```
-
-El backend sigue arquitectura hexagonal: los adaptadores HTTP dependen de puertos de entrada de `application`, y la persistencia queda aislada en adaptadores de salida. Las entidades JPA viven en `adapter/out/persistence/entity` y usan los enums del dominio para roles, estados de caso, estados de resultado y tipos de archivo. Los casos de uso no deben depender de Spring MVC, JPA ni PostgreSQL. La migración `V1__initial_schema.sql` crea únicamente las tablas mínimas para usuario, caso, archivo y resultado. Hibernate no crea ni modifica tablas (`ddl-auto=validate`); todos los cambios de esquema deben añadirse como nuevas migraciones Flyway en `src/main/resources/db/migration`.
-
-## Autenticación local de desarrollo
-
-El proveedor se selecciona con `AUTH_PROVIDER`. El valor por defecto seguro es `disabled`; `AUTH_PROVIDER=local` habilita el proveedor local y sus tres cuentas mediante Flyway. El correo y contraseña de las cuentas de investigador/coordinador conservan identificadores históricos; sus roles guardados son `researcher` y `coordinator`:
-
-| Rol | Correo | Contraseña |
-|---|---|---|
-| `patient` (Paciente) | `paciente@healthdocs.local` | `paciente123` |
-| `researcher` (Investigador) | `estudiante@healthdocs.local` | `estudiante123` |
-| `coordinator` (Coordinador) | `profesor@healthdocs.local` | `profesor123` |
-
-`POST /api/v1/auth/login` devuelve el JWT local y `GET /api/v1/me` devuelve la identidad, rol y `enabled` de la cuenta autenticada. El secreto debe reemplazarse mediante `JWT_SECRET` fuera del entorno local. `AUTH_PROVIDER=local` solo habilita el seed de cuentas de prueba y solo funciona en perfiles `local`/`dev`.
-
-Para validar access tokens de Supabase, configure `AUTH_PROVIDER=supabase`, `AUTH_ISSUER_URL`, `AUTH_JWKS_URL` y `AUTH_AUDIENCE` (por defecto `authenticated`). El backend verifica la firma mediante JWKS, limita los algoritmos a ES256/RS256 y comprueba issuer, audience y expiración. Luego resuelve `(provider=supabase, issuer, subject)` en `auth_identity`; no provisiona ni vincula cuentas automáticamente y toma el rol y `enabled` desde `app_user`. `POST /api/v1/auth/login` responde 410 cuando se selecciona Supabase porque las credenciales deben autenticarse desde el servicio de frontend. La interfaz `AuthProvider` conserva el proveedor local y deja separado el adaptador externo.
-
-Para vincular cuentas existentes de forma aprobada use el importador no web del perfil `auth-migration`, documentado en [`docs/architecture/auth_identity_linking.md`](docs/architecture/auth_identity_linking.md). La simulación es el valor predeterminado; el importador valida access tokens vigentes y registra quién aprobó cada vínculo.
-
-Supabase debe usar una llave de firma asimétrica para publicar las llaves en JWKS. El proveedor local continúa usando `JWT_SECRET` para emitir y validar tokens HMAC de desarrollo; no se debe reutilizar ese secreto para tokens externos.
-
-**Discrepancia reportada:** la versión actual del contrato OpenAPI (`0.2.0`) no declara `enabled` en `UserProfile`; el backend lo expone de forma aditiva para cerrar el requisito de estado de cuenta. El contrato debe incorporar ese campo en la siguiente actualización coordinada.
-
-Las reglas HTTP base son: `patient` para `/cases`, `researcher` o `coordinator` para `/internal`, y únicamente `coordinator` para `/operations`. El rol `admin` está disponible para gestión de roles; cualquier otro privilegio administrativo debe definirse de forma explícita. Los casos de uso que implementen esas rutas deben validar además propiedad del paciente o asignación explícita del usuario interno antes de consultar archivos, resultados o emitir URLs.
-
-## Contrato API
-
-El contrato canónico vive en [`openapi/openapi.yaml`](openapi/openapi.yaml). Antes de implementar o consumir un endpoint, revisar la [guía de trabajo paralelo](docs/api-contract-workflow.md).
-
-## Seguridad
-
-- No subir `.env`, secretos ni credenciales AWS al repositorio.
-- Usar solo datos de prueba hasta definir las condiciones institucionales para información clínica real.
-
-## Flujo interno
-
-Los usuarios `researcher` y `coordinator` asignados pueden consultar `GET /api/v1/internal/cases`, solicitar la descarga de un `INPUT`, crear una intención en `POST /api/v1/internal/cases/{caseId}/result-uploads` y confirmar en `POST /api/v1/files/{fileId}/complete`. La confirmación valida el objeto, evita duplicados y asocia el resultado junto con la auditoría y el cambio de estado en una transacción.
-
-## Notificaciones SQS de resultados
-
-El adaptador SQS está desactivado por defecto. Las credenciales se resuelven
-mediante la cadena estándar del AWS SDK (variables, perfil local o rol de
-ejecución); nunca se configuran en el código.
-
-| Variable | Default | Descripción |
-|---|---|---|
-| `HEALTHDOCS_SQS_ENABLED` | `false` | Activa el adaptador SQS |
-| `AWS_REGION` | `us-east-1` | Región AWS |
-| `HEALTHDOCS_SQS_QUEUE_NAME` | `result-available-dev` | Nombre de la cola |
-| `HEALTHDOCS_SQS_ENDPOINT` | vacío | Endpoint opcional de LocalStack/pruebas |
-| `HEALTHDOCS_SQS_TIMEOUT` | `5s` | Timeout por llamada |
-| `HEALTHDOCS_SQS_MAX_RETRIES` | `3` | Reintentos de errores temporales |
-| `HEALTHDOCS_SQS_RETRY_DELAY` | `250ms` | Espera entre reintentos |
-
-El mensaje JSON contiene `eventVersion`, `eventType`, `eventId`, `resultId`,
-`caseId`, `patientId`, `patientEmail`, `availableAt`, `eventTimestamp` y
-`publishedBy`. No incluye datos clínicos, URLs, tokens ni credenciales. La cola
-estándar no ofrece deduplicación nativa: `eventId` se conserva para que el
-consumidor del paso 5 pueda deduplicar.
+SQS está desactivado por defecto (`HEALTHDOCS_SQS_ENABLED=false`). Al habilitarlo, el backend publica eventos de disponibilidad de resultados en la cola indicada por `HEALTHDOCS_SQS_QUEUE_NAME`, usando las credenciales normales del AWS SDK. El evento no contiene archivos, datos clínicos, URL temporales ni tokens. Publicar el evento en SQS no equivale a entregar un correo al paciente.
