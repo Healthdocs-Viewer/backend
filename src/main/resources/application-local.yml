@@ -8,7 +8,7 @@ spring:
   sql:
     init:
       mode: always
-      data-locations: classpath:db/seed/local/V1__local_test_accounts.sql
+      data-locations: classpath:db/seed/local/V1__local_test_accounts.sql,classpath:db/seed/local/V2__local_demo_users.sql
   flyway:
     # V3 es una migración local de datos y puede aparecer después de V4
     # en bases locales creadas con versiones anteriores del proyecto.
